@@ -1,0 +1,94 @@
+{
+  "name": "cliniqboost — No-Show Recovery",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 15 }]
+        }
+      },
+      "id": "schedule-node",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "appointments",
+        "filters": {
+          "conditions": [
+            { "keyName": "status", "condition": "eq", "keyValue": "scheduled" },
+            { "keyName": "noshow_recovery_sent", "condition": "eq", "keyValue": "false" }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "supabase-get-node",
+      "name": "Get Past-Due Appointments",
+      "type": "n8n-nodes-base.supabase",
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 1
+      },
+      "id": "loop-node",
+      "name": "Loop Over Appointments",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SERVER_URL }}/webhook/twilio/noshow",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "clinic_id", "value": "={{ $json.clinic_id }}" },
+            { "name": "contact_id", "value": "={{ $json.contact_id }}" },
+            { "name": "appointment_date", "value": "={{ $json.appointment_date }}" }
+          ]
+        }
+      },
+      "id": "http-node",
+      "name": "Trigger No-Show SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [900, 220]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "appointments",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "conditions": [
+          { "keyName": "id", "condition": "eq", "keyValue": "={{ $json.id }}" }
+        ],
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "status", "fieldValue": "noshow" },
+            { "fieldId": "noshow_recovery_sent", "fieldValue": "true" }
+          ]
+        }
+      },
+      "id": "supabase-update-node",
+      "name": "Mark Recovery Sent",
+      "type": "n8n-nodes-base.supabase",
+      "position": [900, 380]
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [[{ "node": "Get Past-Due Appointments", "type": "main", "index": 0 }]]
+    },
+    "Get Past-Due Appointments": {
+      "main": [[{ "node": "Loop Over Appointments", "type": "main", "index": 0 }]]
+    },
+    "Loop Over Appointments": {
+      "main": [[
+        { "node": "Trigger No-Show SMS", "type": "main", "index": 0 },
+        { "node": "Mark Recovery Sent", "type": "main", "index": 0 }
+      ]]
+    }
+  }
+}

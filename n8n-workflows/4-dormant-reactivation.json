@@ -1,0 +1,67 @@
+{
+  "name": "cliniqboost — Dormant Patient Reactivation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "weeks", "weeksInterval": 1, "triggerAtDay": [1], "triggerAtHour": 9 }]
+        }
+      },
+      "id": "schedule-node",
+      "name": "Every Monday 9am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "clinics",
+        "filters": {
+          "conditions": [
+            { "keyName": "is_active", "condition": "eq", "keyValue": "true" }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "supabase-get-node",
+      "name": "Get Active Clinics",
+      "type": "n8n-nodes-base.supabase",
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 1
+      },
+      "id": "loop-node",
+      "name": "Loop Over Clinics",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SERVER_URL }}/webhook/twilio/reactivate",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "clinic_id", "value": "={{ $json.id }}" }
+          ]
+        }
+      },
+      "id": "http-node",
+      "name": "Trigger Reactivation Batch",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Every Monday 9am": {
+      "main": [[{ "node": "Get Active Clinics", "type": "main", "index": 0 }]]
+    },
+    "Get Active Clinics": {
+      "main": [[{ "node": "Loop Over Clinics", "type": "main", "index": 0 }]]
+    },
+    "Loop Over Clinics": {
+      "main": [[{ "node": "Trigger Reactivation Batch", "type": "main", "index": 0 }]]
+    }
+  }
+}

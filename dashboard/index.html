@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>cliniqboost — AI Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #080616;
+      color: #E8E8FF;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+    .logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .logo span { color: #2F2FE4; }
+    .live-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #1DB87A;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .live-label {
+      font-size: 12px;
+      color: #1DB87A;
+      font-weight: 600;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .stat-card {
+      background: #0F0E2A;
+      border: 1px solid rgba(47,47,228,0.18);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .stat-num {
+      font-size: 36px;
+      font-weight: 700;
+      color: #2F2FE4;
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: rgba(255,255,255,0.4);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.6);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+    }
+    .messages-feed {
+      background: #0F0E2A;
+      border: 1px solid rgba(47,47,228,0.15);
+      border-radius: 12px;
+      padding: 16px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .message-item {
+      display: flex;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; } }
+    .msg-direction {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 99px;
+      flex-shrink: 0;
+      align-self: flex-start;
+      margin-top: 2px;
+    }
+    .msg-direction.inbound {
+      background: rgba(47,47,228,0.15);
+      color: #6666FF;
+    }
+    .msg-direction.outbound {
+      background: rgba(29,184,122,0.15);
+      color: #1DB87A;
+    }
+    .msg-body { font-size: 13px; color: #E8E8FF; line-height: 1.5; flex: 1; }
+    .msg-time { font-size: 11px; color: rgba(255,255,255,0.25); flex-shrink: 0; }
+    #status { font-size: 12px; color: rgba(255,255,255,0.3); margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">clini<span>q</span>boost</div>
+  <div class="live-dot"></div>
+  <div class="live-label">LIVE</div>
+</div>
+
+<div class="stats">
+  <div class="stat-card">
+    <div class="stat-num" id="stat-missed">—</div>
+    <div class="stat-label">Missed Calls Today</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num" id="stat-messages">—</div>
+    <div class="stat-label">Messages Today</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num" id="stat-conversations">—</div>
+    <div class="stat-label">Active Conversations</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num" id="stat-booked">—</div>
+    <div class="stat-label">Appointments Booked</div>
+  </div>
+</div>
+
+<div class="section-title">Live Message Feed</div>
+<div class="messages-feed" id="messages-feed">
+  <div style="color:rgba(255,255,255,0.2);font-size:13px;text-align:center;padding:20px">
+    Waiting for messages...
+  </div>
+</div>
+<div id="status">Connecting to real-time feed...</div>
+
+<script>
+  // Initialize Supabase
+  const SUPABASE_URL = 'REPLACE_WITH_YOUR_SUPABASE_URL';
+  const SUPABASE_ANON_KEY = 'REPLACE_WITH_YOUR_SUPABASE_ANON_KEY';
+  const { createClient } = supabase;
+  const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // Load initial stats
+  async function loadStats() {
+    const today = new Date().toISOString().split('T')[0];
+
+    const [{ count: missed }, { count: messages },
+           { count: conversations }, { count: booked }] = await Promise.all([
+      db.from('missed_calls').select('*', { count: 'exact', head: true })
+        .gte('created_at', today),
+      db.from('messages').select('*', { count: 'exact', head: true })
+        .gte('created_at', today),
+      db.from('conversations').select('*', { count: 'exact', head: true })
+        .eq('status', 'active'),
+      db.from('appointments').select('*', { count: 'exact', head: true })
+        .gte('created_at', today)
+    ]);
+
+    document.getElementById('stat-missed').textContent = missed || 0;
+    document.getElementById('stat-messages').textContent = messages || 0;
+    document.getElementById('stat-conversations').textContent = conversations || 0;
+    document.getElementById('stat-booked').textContent = booked || 0;
+  }
+
+  // Load recent messages
+  async function loadMessages() {
+    const { data } = await db.from('messages')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (data && data.length > 0) {
+      const feed = document.getElementById('messages-feed');
+      feed.innerHTML = data.reverse().map(msg => `
+        <div class="message-item">
+          <span class="msg-direction ${msg.direction}">${msg.direction}</span>
+          <span class="msg-body">${msg.body}</span>
+          <span class="msg-time">${new Date(msg.created_at).toLocaleTimeString()}</span>
+        </div>
+      `).join('');
+      feed.scrollTop = feed.scrollHeight;
+    }
+  }
+
+  // Real-time subscription
+  function subscribeToMessages() {
+    db.channel('messages-channel')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages'
+      }, (payload) => {
+        const msg = payload.new;
+        const feed = document.getElementById('messages-feed');
+        const item = document.createElement('div');
+        item.className = 'message-item';
+        item.innerHTML = `
+          <span class="msg-direction ${msg.direction}">${msg.direction}</span>
+          <span class="msg-body">${msg.body}</span>
+          <span class="msg-time">${new Date(msg.created_at).toLocaleTimeString()}</span>
+        `;
+        feed.appendChild(item);
+        feed.scrollTop = feed.scrollHeight;
+        loadStats(); // refresh stats
+      })
+      .subscribe((status) => {
+        document.getElementById('status').textContent =
+          status === 'SUBSCRIBED' ? '● Connected — watching live' : `Status: ${status}`;
+      });
+  }
+
+  // Init
+  loadStats();
+  loadMessages();
+  subscribeToMessages();
+  setInterval(loadStats, 30000); // refresh stats every 30s
+</script>
+</body>
+</html>

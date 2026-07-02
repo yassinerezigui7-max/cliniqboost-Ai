@@ -1,0 +1,35 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+
+const twilioRoutes = require('./routes/twilio');
+const healthRoutes = require('./routes/health');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
+// Routes
+app.use('/webhook/twilio', twilioRoutes);
+app.use('/health', healthRoutes);
+
+// Dashboard
+app.use('/dashboard', express.static(path.join(__dirname, '../dashboard')));
+
+// Start
+app.listen(PORT, () => {
+  console.log(`
+  ╔═══════════════════════════════════════╗
+  ║   cliniqboost AI System               ║
+  ║   Running on port ${PORT}                ║
+  ║   Dashboard: http://localhost:${PORT}/dashboard  ║
+  ╚═══════════════════════════════════════╝
+  `);
+});
+
+module.exports = app;

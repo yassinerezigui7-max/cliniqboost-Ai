@@ -1,0 +1,39 @@
+{
+  "name": "cliniqboost — SMS Conversation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "twilio-inbound-sms",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-node",
+      "name": "Twilio Inbound SMS Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SERVER_URL }}/webhook/twilio/inbound-sms",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "To", "value": "={{ $json.To }}" },
+            { "name": "From", "value": "={{ $json.From }}" },
+            { "name": "Body", "value": "={{ $json.Body }}" }
+          ]
+        }
+      },
+      "id": "http-node",
+      "name": "Forward to cliniqboost Server",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [460, 300]
+    }
+  ],
+  "connections": {
+    "Twilio Inbound SMS Webhook": {
+      "main": [[{ "node": "Forward to cliniqboost Server", "type": "main", "index": 0 }]]
+    }
+  }
+}
