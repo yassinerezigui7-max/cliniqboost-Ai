@@ -143,9 +143,91 @@ async function generateReactivationText(clinic, contact) {
   return response.content[0].text;
 }
 
+// ── PILLAR 2 — LEAD ENGINE ─────────────────────────────────────
+// These reuse the SAME anthropic client + callWithRetry wrapper as the
+// missed-call flow — no second Claude path is introduced.
+
+// Convert stored message rows into Anthropic chat turns.
+function historyToTurns(history) {
+  const turns = [];
+  for (const msg of history || []) {
+    turns.push({
+      role: msg.direction === 'outbound' ? 'assistant' : 'user',
+      content: msg.body
+    });
+  }
+  return turns;
+}
+
+/**
+ * Generate a proactive outbound message (first lead touch, nurture, reactivation,
+ * VIP reminder). The caller supplies the SYSTEM prompt (from lead-engine-prompts);
+ * we append the conversation history and a final internal instruction to write
+ * the next message. Returns the message text, or a safe fallback on total failure.
+ *
+ * @param {object}   args
+ * @param {object}   args.clinic
+ * @param {object}   args.contact
+ * @param {string}   args.systemPrompt
+ * @param {Array}    [args.history]   message rows ({direction, body}) for context
+ * @param {string}   [args.label]     log label
+ */
+async function generateSequenceMessage({ clinic, contact, systemPrompt, history = [], label = 'sequence' }) {
+  const messages = historyToTurns(history);
+  // Final internal turn tells Claude to produce the next outbound text now.
+  messages.push({
+    role: 'user',
+    content: '(Write the next text message to send now. Output only the message text.)'
+  });
+
+  const response = await callWithRetry(label, () =>
+    anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 300,
+      system: systemPrompt,
+      messages
+    })
+  );
+
+  if (!response) return fallbackMessage(clinic);
+  return response.content[0].text.trim();
+}
+
+/**
+ * Classify an inbound message into BOOKED | OPT_OUT | NEITHER using the same
+ * Claude client. Returns 'NEITHER' as the safe default if the call fails or the
+ * output is unrecognized (so we never wrongly opt someone out on an API blip).
+ *
+ * @param {object} args
+ * @param {string} args.classifierPrompt  system prompt from lead-engine-prompts.inboundClassifier()
+ * @param {Array}  [args.history]
+ * @param {string} args.message           the latest inbound message body
+ */
+async function classifyInboundIntent({ classifierPrompt, history = [], message }) {
+  const messages = historyToTurns(history);
+  messages.push({ role: 'user', content: message });
+
+  const response = await callWithRetry('classifyInboundIntent', () =>
+    anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 8,
+      system: classifierPrompt,
+      messages
+    })
+  );
+
+  if (!response) return 'NEITHER';
+  const label = (response.content[0].text || '').trim().toUpperCase();
+  if (label.includes('BOOKED')) return 'BOOKED';
+  if (label.includes('OPT_OUT') || label.includes('OPTOUT')) return 'OPT_OUT';
+  return 'NEITHER';
+}
+
 module.exports = {
   generateResponse,
   generateMissedCallText,
   generateNoShowText,
-  generateReactivationText
+  generateReactivationText,
+  generateSequenceMessage,
+  classifyInboundIntent
 };
