@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../services/supabase');
 const claude = require('../services/claude');
 const twilio = require('../services/twilio');
+const leadEngine = require('../services/leadEngine');
 
 // ── MISSED CALL WEBHOOK ────────────────────────────────────────
 // Twilio calls this when a call is missed (no answer)
@@ -85,6 +86,11 @@ router.post('/inbound-sms', async (req, res) => {
 
         // 2. Get or create contact
         const contact = await db.getOrCreateContact(clinic.id, From);
+
+        // 2b. Lead-engine reply short-circuit: if this contact has pending
+        // sequence touches, detect booking / opt-out and update the schedule.
+        // (No-op when there are no pending touches; never throws.)
+        await leadEngine.handleInboundReply({ clinic, contact, body: Body });
 
         // 3. Get or create conversation
         const conversation = await db.getOrCreateConversation(
