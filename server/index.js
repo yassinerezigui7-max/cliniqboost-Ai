@@ -5,6 +5,8 @@ const path = require('path');
 
 const twilioRoutes = require('./routes/twilio');
 const healthRoutes = require('./routes/health');
+const leadRoutes = require('./routes/leads');
+const { registerCron } = require('./jobs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +18,7 @@ app.use(express.urlencoded({ extended: false }));
 
 // Routes
 app.use('/webhook/twilio', twilioRoutes);
+app.use('/webhooks', leadRoutes);
 app.use('/health', healthRoutes);
 
 // Dashboard
@@ -30,6 +33,9 @@ app.listen(PORT, () => {
   ║   Dashboard: http://localhost:${PORT}/dashboard  ║
   ╚═══════════════════════════════════════╝
   `);
+
+  // Register background schedulers (guarded by SCHEDULER_ENABLED).
+  registerCron();
 });
 
 module.exports = app;
