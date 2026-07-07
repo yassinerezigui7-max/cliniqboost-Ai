@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const { runSequenceJob } = require('./sequenceScheduler');
 const { runVipSweep } = require('./vipSweep');
+const { runAppointmentJob } = require('./appointmentJob');
 
 // Register in-process cron jobs. Guarded by SCHEDULER_ENABLED so Railway can
 // disable the schedulers without a redeploy.
@@ -24,7 +25,12 @@ function registerCron() {
     runVipSweep().catch(err => console.error('[jobs] vip sweep error:', err));
   });
 
-  console.log('[jobs] cron registered — sequences: */15 * * * * | vip-sweep: 0 10 * * *');
+  // Appointment reminders + no-show recovery + waitlist offer timeouts — every 15 min.
+  cron.schedule('*/15 * * * *', () => {
+    runAppointmentJob().catch(err => console.error('[jobs] appointment job error:', err));
+  });
+
+  console.log('[jobs] cron registered — sequences: */15 * * * * | vip-sweep: 0 10 * * * | appointments: */15 * * * *');
 }
 
 module.exports = { registerCron };

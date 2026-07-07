@@ -172,3 +172,80 @@ applied later, when the **sequence scheduler** actually sends the row.
 4. `npm run job:vip-sweep` → VIP reminder rows inserted; picked up by the sequence job.
 
 No real Twilio call occurs at any step while `TWILIO_SEND_ENABLED=false`.
+
+---
+
+# Sub-system 5 — Appointment reminders, no-show recovery, waitlist fill
+
+**Step 0:** run `supabase/subsystem5-waitlist.sql` (creates `waitlist`) in the Supabase
+SQL Editor first — it is **not** yet deployed. (`supabase/pillar2-schema.sql` too, if you
+haven't.) `appointments` and its reminder/no-show columns already exist.
+
+All three builds are driven by one job: `npm run job:appointments` (also on cron `*/15`).
+
+## Build 5A — Appointment reminders
+
+Seed an appointment ~24h out (use a real `clinic_id` + `contact_id`):
+```sql
+insert into appointments (clinic_id, contact_id, appointment_date, service, status)
+values ('CLINIC_ID', 'CONTACT_ID', now() + interval '24 hours', 'Botox', 'scheduled');
+```
+```bash
+npm run job:appointments
+```
+**Expected** (`stats.reminded_24h` = 1) — a `[MOCK SMS]` 24h reminder, a `messages` row
+(`twilio_sid='MOCK'`), and `appointments.reminder_sent_24h = true`.
+- If the clinic's local time is outside 09:00–19:00, the 24h reminder is **deferred**
+  (`stats.deferred_quiet_hours` increments, `reminder_sent_24h` stays false) and retried next run.
+- A row at `now() + interval '2 hours'` yields a 2h reminder (`reminded_2h`), **ignoring quiet hours**.
+
+**Confirmation reply** (reuses the central inbound hook — reply `YES`):
+```bash
+curl -X POST http://localhost:3000/webhook/twilio/inbound-sms \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "To=CLINIC_TWILIO_NUMBER" --data-urlencode "From=CONTACT_PHONE" \
+  --data-urlencode "Body=YES"
+```
+→ `appointments.status` becomes `confirmed`.
+
+## Build 5B — No-show recovery
+
+Seed an appointment in the past that was never completed:
+```sql
+insert into appointments (clinic_id, contact_id, appointment_date, service, status)
+values ('CLINIC_ID', 'CONTACT_ID', now() - interval '45 minutes', 'Botox', 'scheduled');
+```
+```bash
+npm run job:appointments
+```
+**Expected** (`stats.noshow_recovered` = 1): `appointments.status = 'noshow'`,
+`noshow_recovery_sent = true`, and a `[MOCK SMS]` recovery message logged to `messages`.
+(No-shows do **not** auto-fill the waitlist — that's cancellation-only by design.)
+
+## Build 5C — Cancellation → waitlist fill
+
+Seed a waitlist entry, then cancel a matching appointment:
+```sql
+insert into waitlist (clinic_id, contact_id, service, status)
+values ('CLINIC_ID', 'CONTACT_ID', 'Botox', 'waiting');
+```
+```bash
+curl -X POST http://localhost:3000/webhooks/appointment-cancelled \
+  -H "Content-Type: application/json" -H "x-cliniqboost-secret: $NEW_LEAD_WEBHOOK_SECRET" \
+  -d '{"appointment_id":"APPOINTMENT_ID"}'
+```
+**Expected 200** `{ cancelled:true, offer:{ offered:true, waitlist_id, contact_id } }`:
+`appointments.status='cancelled'`; the best-matching (FCFS, service/date-aware, non-opted-out)
+`waitlist` row → `status='offered'`, `offered_appointment_id`, `offered_at` set; a `[MOCK SMS]`
+offer logged.
+
+**Claim** (reply `YES`): same inbound curl as 5A → `waitlist.status='booked'`.
+
+**Offer timeout cascade:** if no reply within `WAITLIST_OFFER_WINDOW_MINUTES` (default 60), the
+next `npm run job:appointments` marks that offer `status='expired'` and, if the appointment is
+still `cancelled`, offers the slot to the next eligible waitlist contact (`stats.offers_cascaded`).
+To test immediately, set the env var low (e.g. `WAITLIST_OFFER_WINDOW_MINUTES=0`) or back-date
+`offered_at` in SQL, then re-run the job.
+
+**Deposit enforcement is intentionally OUT OF SCOPE** (needs a Stripe/payment integration that
+doesn't exist here) — scope separately later.

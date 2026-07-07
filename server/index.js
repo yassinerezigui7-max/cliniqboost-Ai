@@ -6,6 +6,7 @@ const path = require('path');
 const twilioRoutes = require('./routes/twilio');
 const healthRoutes = require('./routes/health');
 const leadRoutes = require('./routes/leads');
+const appointmentRoutes = require('./routes/appointments');
 const { registerCron } = require('./jobs');
 
 const app = express();
@@ -19,6 +20,7 @@ app.use(express.urlencoded({ extended: false }));
 // Routes
 app.use('/webhook/twilio', twilioRoutes);
 app.use('/webhooks', leadRoutes);
+app.use('/webhooks', appointmentRoutes);
 app.use('/health', healthRoutes);
 
 // Dashboard

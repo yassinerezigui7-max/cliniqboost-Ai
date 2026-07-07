@@ -7,7 +7,8 @@
     "start": "node server/index.js",
     "dev": "nodemon server/index.js",
     "job:sequences": "node server/jobs/run-sequences.js",
-    "job:vip-sweep": "node server/jobs/run-vip-sweep.js"
+    "job:vip-sweep": "node server/jobs/run-vip-sweep.js",
+    "job:appointments": "node server/jobs/run-appointments.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
