@@ -143,6 +143,70 @@ function promptForTouch({ clinic, contact, sequence_type, reminder_type, touch_n
   return newLeadNurture(clinic, contact, touch_number || 1);
 }
 
+// ── SUB-SYSTEM 5 — APPOINTMENTS / NO-SHOW / WAITLIST ───────────
+
+function fmtWhen(appointmentDate, clinic) {
+  // Human-friendly local date/time in the clinic's timezone.
+  if (!appointmentDate) return 'your upcoming appointment';
+  try {
+    const tz = clinic && clinic.timezone ? clinic.timezone : 'UTC';
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, weekday: 'short', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit'
+    }).format(new Date(appointmentDate));
+  } catch (_e) {
+    return new Date(appointmentDate).toISOString();
+  }
+}
+
+// appointment_reminder_24h — friendly, states date/time/service, asks to confirm.
+function appointmentReminder24h(clinic, contact, opts = {}) {
+  const when = fmtWhen(opts.appointment_date, clinic);
+  const service = opts.service ? ` for ${opts.service}` : '';
+  return `${sharedPreamble(clinic)}
+${contactLine(contact)}
+
+SITUATION: Send a 24-hour reminder about the contact's appointment${service} on ${when}.
+Be warm and brief. State the day/time (and service if given). Ask them to reply YES to
+confirm they're still coming. If they can't make it, invite them to let us know so we can help.`;
+}
+
+// appointment_reminder_2h — shorter, more immediate ("see you soon!"), still asks confirm.
+function appointmentReminder2h(clinic, contact, opts = {}) {
+  const when = fmtWhen(opts.appointment_date, clinic);
+  const service = opts.service ? ` for ${opts.service}` : '';
+  return `${sharedPreamble(clinic)}
+${contactLine(contact)}
+
+SITUATION: Send a short, upbeat 2-hour reminder — their appointment${service} is coming up soon
+(${when}). Keep it to one or two lines ("see you soon!"). Ask them to reply YES to confirm.`;
+}
+
+// noshow_recovery — warm, zero guilt, assumes something came up, offers to rebook now.
+function noshowRecovery(clinic, contact, opts = {}) {
+  const service = opts.service ? ` ${opts.service}` : '';
+  return `${sharedPreamble(clinic)}
+${contactLine(contact)}
+
+SITUATION: The contact missed their${service} appointment today. Assume life got in the way —
+absolutely NO guilt or blame. Warmly let them know we'd love to get them back in, and offer to
+rebook right away (point to the booking link or offer that the team will find them a new time).`;
+}
+
+// waitlist_slot_offer — enthusiastic but time-boxed; clear what to reply to claim it.
+function waitlistSlotOffer(clinic, contact, opts = {}) {
+  const when = fmtWhen(opts.appointment_date, clinic);
+  const service = opts.service ? ` for ${opts.service}` : '';
+  const windowMin = opts.window_minutes || 60;
+  return `${sharedPreamble(clinic)}
+${contactLine(contact)}
+
+SITUATION: A slot just opened up${service} on ${when} and this contact is on the waitlist for it.
+Let them know with genuine warmth that it's available. Make the limited window clear without being
+pushy: they should reply YES within the next ${windowMin} minutes to claim it, otherwise it goes to
+the next person. Be clear that replying YES claims the slot.`;
+}
+
 module.exports = {
   sharedPreamble,
   newLeadQualification,
@@ -150,5 +214,10 @@ module.exports = {
   reactivation,
   vipRetention,
   inboundClassifier,
-  promptForTouch
+  promptForTouch,
+  // sub-system 5
+  appointmentReminder24h,
+  appointmentReminder2h,
+  noshowRecovery,
+  waitlistSlotOffer
 };

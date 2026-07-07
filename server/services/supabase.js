@@ -331,6 +331,125 @@ async function getStaleVipTouches(sentBeforeIso) {
   return data || [];
 }
 
+// ═══════════════════════════════════════════════════════════════
+// SUB-SYSTEM 5 — APPOINTMENTS + WAITLIST HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+async function getAppointmentById(id) {
+  const { data } = await supabase
+    .from('appointments').select('*').eq('id', id).maybeSingle();
+  return data || null;
+}
+
+// 24h reminders due: scheduled, start in [now+23h, now+25h], not yet reminded.
+async function getDueReminders24h() {
+  const now = Date.now();
+  const { data, error } = await supabase
+    .from('appointments').select('*')
+    .eq('status', 'scheduled')
+    .eq('reminder_sent_24h', false)
+    .gte('appointment_date', new Date(now + 23 * 60 * 60 * 1000).toISOString())
+    .lte('appointment_date', new Date(now + 25 * 60 * 60 * 1000).toISOString());
+  if (error) throw error;
+  return data || [];
+}
+
+// 2h reminders due: scheduled, start in [now+1.5h, now+2.5h], not yet reminded.
+async function getDueReminders2h() {
+  const now = Date.now();
+  const { data, error } = await supabase
+    .from('appointments').select('*')
+    .eq('status', 'scheduled')
+    .eq('reminder_sent_2h', false)
+    .gte('appointment_date', new Date(now + 1.5 * 60 * 60 * 1000).toISOString())
+    .lte('appointment_date', new Date(now + 2.5 * 60 * 60 * 1000).toISOString());
+  if (error) throw error;
+  return data || [];
+}
+
+// No-show candidates: start > 30 min ago, still scheduled/confirmed, no recovery sent.
+async function getNoShowCandidates() {
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from('appointments').select('*')
+    .in('status', ['scheduled', 'confirmed'])
+    .eq('noshow_recovery_sent', false)
+    .lt('appointment_date', cutoff);
+  if (error) throw error;
+  return data || [];
+}
+
+async function markReminderSent(appointmentId, column) {
+  if (column !== 'reminder_sent_24h' && column !== 'reminder_sent_2h') {
+    throw new Error(`invalid reminder column: ${column}`);
+  }
+  const { error } = await supabase
+    .from('appointments').update({ [column]: true }).eq('id', appointmentId);
+  if (error) throw error;
+}
+
+async function setAppointmentStatus(appointmentId, status) {
+  const { error } = await supabase
+    .from('appointments').update({ status }).eq('id', appointmentId);
+  if (error) throw error;
+}
+
+async function markNoShowRecoverySent(appointmentId) {
+  const { error } = await supabase
+    .from('appointments').update({ noshow_recovery_sent: true }).eq('id', appointmentId);
+  if (error) throw error;
+}
+
+// A confirmable appointment for this contact: reminded, still 'scheduled'.
+async function getConfirmableAppointmentByContact(contactId) {
+  const { data } = await supabase
+    .from('appointments').select('*')
+    .eq('contact_id', contactId)
+    .eq('status', 'scheduled')
+    .or('reminder_sent_24h.eq.true,reminder_sent_2h.eq.true')
+    .order('appointment_date', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  return data || null;
+}
+
+// ── WAITLIST ───────────────────────────────────────────────────
+async function getWaitingWaitlistByClinic(clinicId) {
+  const { data, error } = await supabase
+    .from('waitlist').select('*')
+    .eq('clinic_id', clinicId)
+    .eq('status', 'waiting')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+async function getExpiredOfferedWaitlist(offeredBeforeIso) {
+  const { data, error } = await supabase
+    .from('waitlist').select('*')
+    .eq('status', 'offered')
+    .lt('offered_at', offeredBeforeIso);
+  if (error) throw error;
+  return data || [];
+}
+
+async function getOfferedWaitlistByContact(contactId) {
+  const { data } = await supabase
+    .from('waitlist').select('*')
+    .eq('contact_id', contactId)
+    .eq('status', 'offered')
+    .order('offered_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data || null;
+}
+
+async function updateWaitlist(waitlistId, patch) {
+  const { error } = await supabase
+    .from('waitlist').update(patch).eq('id', waitlistId);
+  if (error) throw error;
+}
+
 module.exports = {
   // existing (missed-call flow) — unchanged
   getClinicByPhone,
@@ -359,5 +478,18 @@ module.exports = {
   rescheduleTouch,
   getDueTouches,
   findRecentVipTouch,
-  getStaleVipTouches
+  getStaleVipTouches,
+  // sub-system 5 — appointments + waitlist
+  getAppointmentById,
+  getDueReminders24h,
+  getDueReminders2h,
+  getNoShowCandidates,
+  markReminderSent,
+  setAppointmentStatus,
+  markNoShowRecoverySent,
+  getConfirmableAppointmentByContact,
+  getWaitingWaitlistByClinic,
+  getExpiredOfferedWaitlist,
+  getOfferedWaitlistByContact,
+  updateWaitlist
 };
