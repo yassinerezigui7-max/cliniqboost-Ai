@@ -299,3 +299,33 @@ or check the Railway logs for the `[new-lead]` request.
 Test it with Meta's **Lead Ads Testing Tool** (developers.facebook.com/tools/lead-ads-testing) against
 the connected page/form, then watch the n8n execution. The `Normalize Meta Lead` node handles both the
 `field_data: [{name, values}]` array and flattened first_name/last_name payload shapes.
+
+## Workflow 6 — `6-vagaro-cancellation.json` (Vagaro cancellation → waitlist fill)
+
+`Vagaro Cancellation Webhook` (`vagaro-appointment-cancelled`) → `Normalize Vagaro Cancellation`
+→ POST `/webhooks/appointment-cancelled`. The Code node forwards **only cancellations**
+(`payload.bookingStatus === "Cancel"`, or `action` deleted/cancelled) and drops everything else.
+
+**Test a cancellation** (fake Vagaro envelope):
+```bash
+curl -X POST "$N8N_URL/webhook-test/vagaro-appointment-cancelled" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "evt-1",
+    "type": "appointment",
+    "action": "updated",
+    "payload": { "appointmentId": "2dwfErtmMAFxe6hoCnQStw==", "bookingStatus": "Cancel" }
+  }'
+```
+**Expected:** `Normalize Vagaro Cancellation` emits `{ appointment_id: "2dwfErtmMAFxe6hoCnQStw==" }`
+and the HTTP node POSTs it to `$SERVER_URL/webhooks/appointment-cancelled` with the
+`x-cliniqboost-secret` header.
+
+⚠️ **Known limitation (documented in the Code node):** Vagaro's `appointmentId` is a base64
+internal ID, **not** our `appointments.id` UUID — so the backend will respond **404
+"appointment not found"** for a real Vagaro payload. That's expected until a Vagaro-id →
+`appointments.id` lookup is added. To test the **happy path** now, replace `appointmentId` with a
+real `appointments.id` UUID from Supabase → backend returns **200** `{cancelled:true, offer:{…}}`.
+
+**Non-cancellation is ignored:** send the same payload with `"action":"created"` and
+`"bookingStatus":"Confirmed"` — the workflow produces no items and nothing is POSTed.

@@ -1,0 +1,95 @@
+{
+  "name": "cliniqboost — Vagaro Cancellation → Waitlist Fill",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vagaro-appointment-cancelled",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "vagaro-webhook",
+      "name": "Vagaro Cancellation Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n * Normalize a Vagaro appointment webhook into { appointment_id } for\n * POST /webhooks/appointment-cancelled, forwarding only CANCELLATIONS.\n *\n * Confirmed envelope (docs.vagaro.com, Jul 2026):\n *   { id, createdDate, type: \"appointment\", action: \"created\"|\"updated\"|\"deleted\",\n *     payload: { appointmentId, bookingStatus, startTime, serviceTitle, ... } }\n * A cancellation is signalled by payload.bookingStatus === \"Cancel\"\n * (action is typically \"updated\" or \"deleted\"). Vagaro webhook support is\n * PLAN-DEPENDENT and payload keys have varied across accounts, so we parse the\n * envelope defensively and fall back across several key spellings.\n *\n * ⚠️  CRITICAL: payload.appointmentId is Vagaro's INTERNAL id — a base64 string\n *     like \"2dwfErtmMAFxe6hoCnQStw==\". It is NOT our Supabase appointments.id\n *     (a UUID). We forward it as-is, so the backend will currently respond 404\n *     (\"appointment not found\"). A Vagaro-id -> appointments.id lookup/mapping\n *     must be added (here or in the backend) BEFORE this workflow goes live.\n */\nconst out = [];\nfor (const entry of $input.all()) {\n  const raw = (entry.json && entry.json.body) || entry.json || {};   // webhook nests under body\n  const payload = raw.payload || raw.data || raw;                    // envelope variants\n\n  const status = String(payload.bookingStatus || payload.booking_status || raw.bookingStatus || '').toLowerCase();\n  const action = String(raw.action || raw.eventType || raw.event || '').toLowerCase();\n  const isCancel = ['cancel', 'cancelled', 'canceled'].includes(status)\n    || ['deleted', 'cancelled', 'canceled', 'cancel'].includes(action);\n  if (!isCancel) continue;   // ignore created/updated-but-not-cancelled events\n\n  const appointment_id = payload.appointmentId || payload.appointment_id || payload.id\n    || raw.appointmentId || raw.appointment_id || null;\n  if (!appointment_id) continue;\n\n  out.push({ json: { appointment_id } });\n}\nreturn out;"
+      },
+      "id": "normalize-vagaro",
+      "name": "Normalize Vagaro Cancellation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SERVER_URL }}/webhooks/appointment-cancelled",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-cliniqboost-secret",
+              "value": "={{ $env.CLINIQBOOST_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "appointment_id",
+              "value": "={{ $json.appointment_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-cancel",
+      "name": "POST to cliniqboost /webhooks/appointment-cancelled",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Vagaro Cancellation Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Vagaro Cancellation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Vagaro Cancellation": {
+      "main": [
+        [
+          {
+            "node": "POST to cliniqboost /webhooks/appointment-cancelled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {}
+}
