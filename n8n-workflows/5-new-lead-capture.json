@@ -1,0 +1,161 @@
+{
+  "name": "cliniqboost — New-Lead Capture (Meta + Google Ads)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "meta-trigger",
+      "name": "Meta Lead Ads Trigger",
+      "type": "n8n-nodes-base.facebookLeadAdsTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n * Normalize a Meta (Facebook/Instagram) Lead Ads lead into the cliniqboost shape:\n *   { clinic_id, source, name, phone, email, treatment_interest }\n *\n * Meta delivers answers as a field_data array: [{ name, values: [..] }].\n * Some n8n versions / manual test payloads flatten these to top-level keys,\n * so we read both. Custom \"treatment\" questions vary in field name, hence the\n * generous key list below.\n */\nconst out = [];\nfor (const entry of $input.all()) {\n  const item = entry.json || {};\n\n  const fd = item.field_data || item.fieldData;\n  const fromFieldData = (keys) => {\n    if (!Array.isArray(fd)) return undefined;\n    for (const f of fd) {\n      const nm = String(f.name || '').toLowerCase();\n      if (keys.includes(nm)) {\n        const v = Array.isArray(f.values) ? f.values[0] : f.value;\n        if (v) return v;\n      }\n    }\n    return undefined;\n  };\n\n  const name = item.full_name || item.name\n    || fromFieldData(['full_name', 'name', 'your_name'])\n    || [item.first_name, item.last_name].filter(Boolean).join(' ').trim()\n    || null;\n  const phone = item.phone_number || item.phone\n    || fromFieldData(['phone_number', 'phone', 'mobile', 'mobile_number']) || null;\n  const email = item.email\n    || fromFieldData(['email', 'email_address']) || null;\n  const treatment_interest = item.treatment_interest || item.treatment\n    || fromFieldData(['treatment_interest', 'treatment', 'service', 'interest',\n        'what_service_are_you_interested_in', 'which_treatment']) || null;\n\n  out.push({\n    json: {\n      // ▼▼ Fill in per-client at onboarding ▼▼\n      clinic_id: 'REPLACE_WITH_CLINIC_UUID',\n      source: 'ad_form',\n      name,\n      phone,\n      email,\n      treatment_interest\n    }\n  });\n}\nreturn out;"
+      },
+      "id": "normalize-meta",
+      "name": "Normalize Meta Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "google-lead-form",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "google-webhook",
+      "name": "Google Ads Lead Form Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n * Normalize a Google Ads Lead Form Extension lead into the cliniqboost shape.\n * Google POSTs JSON to a webhook; the n8n Webhook node nests it under $json.body.\n * Fields arrive in user_column_data: [{ column_id, string_value }], where\n * column_id is an enum like FULL_NAME / PHONE_NUMBER / EMAIL (custom questions\n * use the question text). We read column_id and column_name defensively.\n */\nconst out = [];\nfor (const entry of $input.all()) {\n  const body = (entry.json && entry.json.body) || entry.json || {};\n\n  const cols = body.user_column_data || body.userColumnData;\n  const fromColumns = (ids) => {\n    if (!Array.isArray(cols)) return undefined;\n    const wanted = ids.map((s) => s.toUpperCase());\n    for (const c of cols) {\n      const id = String(c.column_id || c.columnId || '').toUpperCase();\n      const nm = String(c.column_name || c.columnName || '').toUpperCase();\n      if (wanted.includes(id) || wanted.includes(nm)) {\n        const v = c.string_value || c.stringValue;\n        if (v) return v;\n      }\n    }\n    return undefined;\n  };\n\n  const name = fromColumns(['FULL_NAME', 'NAME', 'FIRST_NAME']) || body.full_name || body.name || null;\n  const phone = fromColumns(['PHONE_NUMBER', 'PHONE']) || body.phone_number || body.phone || null;\n  const email = fromColumns(['EMAIL', 'USER_EMAIL']) || body.email || null;\n  const treatment_interest = fromColumns(['TREATMENT_INTEREST', 'SERVICE', 'INTEREST', 'TREATMENT'])\n    || body.treatment_interest || null;\n\n  out.push({\n    json: {\n      // ▼▼ Fill in per-client at onboarding ▼▼\n      clinic_id: 'REPLACE_WITH_CLINIC_UUID',\n      source: 'ad_form',\n      name,\n      phone,\n      email,\n      treatment_interest\n    }\n  });\n}\nreturn out;"
+      },
+      "id": "normalize-google",
+      "name": "Normalize Google Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SERVER_URL }}/webhooks/new-lead",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-cliniqboost-secret",
+              "value": "={{ $env.CLINIQBOOST_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "clinic_id",
+              "value": "={{ $json.clinic_id }}"
+            },
+            {
+              "name": "source",
+              "value": "={{ $json.source }}"
+            },
+            {
+              "name": "name",
+              "value": "={{ $json.name }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.email }}"
+            },
+            {
+              "name": "treatment_interest",
+              "value": "={{ $json.treatment_interest }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-new-lead",
+      "name": "POST to cliniqboost /webhooks/new-lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Meta Lead Ads Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Meta Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Meta Lead": {
+      "main": [
+        [
+          {
+            "node": "POST to cliniqboost /webhooks/new-lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Ads Lead Form Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Google Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Google Lead": {
+      "main": [
+        [
+          {
+            "node": "POST to cliniqboost /webhooks/new-lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {}
+}

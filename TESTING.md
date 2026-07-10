@@ -249,3 +249,53 @@ To test immediately, set the env var low (e.g. `WAITLIST_OFFER_WINDOW_MINUTES=0`
 
 **Deposit enforcement is intentionally OUT OF SCOPE** (needs a Stripe/payment integration that
 doesn't exist here) — scope separately later.
+
+---
+
+# n8n workflows
+
+Both new workflows import with `active: false` (safe — they won't run until you enable them).
+They reference two n8n environment variables (Settings → Variables, or the host env):
+
+- `SERVER_URL` — the Railway backend base URL, e.g. `https://cliniqboost-ai-production.up.railway.app`
+- `CLINIQBOOST_WEBHOOK_SECRET` — must equal the backend's `NEW_LEAD_WEBHOOK_SECRET`
+
+**Test vs production webhook URLs:** while a workflow is inactive, open it, click **Listen for
+test event**, and use the `…/webhook-test/<path>` URL. Once activated, use `…/webhook/<path>`.
+
+## Workflow 5 — `5-new-lead-capture.json` (Meta Lead Ads + Google Ads Lead Form)
+
+Two entry points feed one POST to `/webhooks/new-lead`:
+- **Meta Lead Ads Trigger** → `Normalize Meta Lead` → HTTP
+- **Google Ads Lead Form Webhook** (`google-lead-form`) → `Normalize Google Lead` → HTTP
+
+**Before testing:** open both Code nodes and replace `REPLACE_WITH_CLINIC_UUID` with the real
+clinic UUID (done per-client at onboarding).
+
+**Test the Google branch** (curl a fake Google Lead Form payload at the webhook):
+```bash
+curl -X POST "$N8N_URL/webhook-test/google-lead-form" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "lead_id": "test-123",
+    "user_column_data": [
+      {"column_id":"FULL_NAME","string_value":"Jane Doe"},
+      {"column_id":"PHONE_NUMBER","string_value":"0791234567"},
+      {"column_id":"EMAIL","string_value":"jane@example.com"}
+    ]
+  }'
+```
+**Expected:** the n8n execution shows `Normalize Google Lead` outputting
+`{clinic_id, source:"ad_form", name:"Jane Doe", phone:"0791234567", email, treatment_interest:null}`,
+then the HTTP node POSTs it to `$SERVER_URL/webhooks/new-lead` with header
+`x-cliniqboost-secret: <secret>`. The backend returns **200** `{contact_id, conversation_id}`
+(or **422** if the `clinic_id` placeholder wasn't replaced, or **401** if the secret is wrong).
+
+**Verify the auth header reaches Railway:** temporarily set `SERVER_URL` to a request inspector
+(e.g. `https://webhook.site/<id>`) and confirm the `x-cliniqboost-secret` header + JSON body arrive;
+or check the Railway logs for the `[new-lead]` request.
+
+**Meta branch:** the Facebook Lead Ads Trigger can't be curled (Meta registers it and pushes leads).
+Test it with Meta's **Lead Ads Testing Tool** (developers.facebook.com/tools/lead-ads-testing) against
+the connected page/form, then watch the n8n execution. The `Normalize Meta Lead` node handles both the
+`field_data: [{name, values}]` array and flattened first_name/last_name payload shapes.
