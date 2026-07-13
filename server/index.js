@@ -7,6 +7,7 @@ const twilioRoutes = require('./routes/twilio');
 const healthRoutes = require('./routes/health');
 const leadRoutes = require('./routes/leads');
 const appointmentRoutes = require('./routes/appointments');
+const dashboardApiRoutes = require('./routes/dashboard');
 const { registerCron } = require('./jobs');
 
 const app = express();
@@ -23,7 +24,8 @@ app.use('/webhooks', leadRoutes);
 app.use('/webhooks', appointmentRoutes);
 app.use('/health', healthRoutes);
 
-// Dashboard
+// Dashboard — login-gated stats API (service key, server-side) + static page.
+app.use('/dashboard-api', dashboardApiRoutes);
 app.use('/dashboard', express.static(path.join(__dirname, '../dashboard')));
 
 // Start

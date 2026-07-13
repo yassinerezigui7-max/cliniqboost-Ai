@@ -329,3 +329,33 @@ real `appointments.id` UUID from Supabase → backend returns **200** `{cancelle
 
 **Non-cancellation is ignored:** send the same payload with `"action":"created"` and
 `"bookingStatus":"Confirmed"` — the workflow produces no items and nothing is POSTed.
+
+---
+
+# Dashboard (login-gated)
+
+The dashboard reads patient data through a **login-gated backend endpoint** that uses the
+service key server-side — the browser never receives a Supabase key (no RLS/anon-key exposure).
+
+**Setup:** set `DASHBOARD_PASSWORD` on the server (Railway env), then start the server.
+
+**API:**
+- `POST /dashboard-api/login` `{ "password": "…" }` → `{ token }` (12h HMAC token) or 401.
+- `GET /dashboard-api/stats` with `Authorization: Bearer <token>` → `{ missed_calls_today,
+  messages_today, active_conversations, appointments_today, recent_messages: [...] }`; 401 without/expired token.
+
+**Quick API test:**
+```bash
+TOKEN=$(curl -s -X POST http://localhost:3000/dashboard-api/login \
+  -H "Content-Type: application/json" -d '{"password":"YOUR_DASHBOARD_PASSWORD"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+curl -s http://localhost:3000/dashboard-api/stats -H "Authorization: Bearer $TOKEN"
+```
+
+**Browser test:** open `http://localhost:3000/dashboard/` (or the Railway `/dashboard/` URL) →
+enter the password → the stat tiles + live message feed populate and refresh every 15s. Wrong
+password shows an inline error; the token is stored in `localStorage` and cleared on **Sign out**
+or when it expires (a 401 bounces you back to the login screen).
+
+> `supabase/dashboard-rls-policies.sql` is the **superseded** Option A (public anon-read policies).
+> It is NOT needed with this login-gated design and should not be run in production.

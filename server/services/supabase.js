@@ -332,6 +332,35 @@ async function getStaleVipTouches(sentBeforeIso) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// DASHBOARD — server-side aggregates (service key, bypasses RLS)
+// ═══════════════════════════════════════════════════════════════
+async function getDashboardStats() {
+  const today = new Date().toISOString().split('T')[0];
+  const [missed, messages, conversations, appointments] = await Promise.all([
+    supabase.from('missed_calls').select('*', { count: 'exact', head: true }).gte('created_at', today),
+    supabase.from('messages').select('*', { count: 'exact', head: true }).gte('created_at', today),
+    supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+    supabase.from('appointments').select('*', { count: 'exact', head: true }).gte('created_at', today)
+  ]);
+  return {
+    missed_calls_today: missed.count || 0,
+    messages_today: messages.count || 0,
+    active_conversations: conversations.count || 0,
+    appointments_today: appointments.count || 0
+  };
+}
+
+async function getRecentMessages(limit = 20) {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('direction, body, created_at')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data || []).reverse(); // chronological for the feed
+}
+
+// ═══════════════════════════════════════════════════════════════
 // SUB-SYSTEM 5 — APPOINTMENTS + WAITLIST HELPERS
 // ═══════════════════════════════════════════════════════════════
 
@@ -491,5 +520,8 @@ module.exports = {
   getWaitingWaitlistByClinic,
   getExpiredOfferedWaitlist,
   getOfferedWaitlistByContact,
-  updateWaitlist
+  updateWaitlist,
+  // dashboard
+  getDashboardStats,
+  getRecentMessages
 };
