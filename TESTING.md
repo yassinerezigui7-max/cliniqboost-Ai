@@ -359,3 +359,143 @@ or when it expires (a 401 bounces you back to the login screen).
 
 > `supabase/dashboard-rls-policies.sql` is the **superseded** Option A (public anon-read policies).
 > It is NOT needed with this login-gated design and should not be run in production.
+
+---
+
+# Automatic Onboarding — Phase 0 + 1: `POST /onboarding/submit`
+
+Mock mode as usual: `TWILIO_SEND_ENABLED=false`, `SCHEDULER_ENABLED=false`.
+No Twilio or n8n call happens in these phases at all — submit only writes to
+Supabase (one RPC transaction) and mirrors a copy to Formspree.
+
+## Step 0 — Apply the schema (REQUIRED, one time)
+
+Run [`supabase/onboarding-schema.sql`](supabase/onboarding-schema.sql) in the
+Supabase SQL Editor. Idempotent, additive. It adds the `clinics` onboarding
+columns, creates `clinic_config`, `onboarding_submissions`, `provisioning_jobs`,
+`integration_tasks`, `lead_sources`, `import_jobs`, and the RPC
+`create_clinic_onboarding`. ⚠️ Prerequisites: `pillar2-schema.sql` and
+`subsystem5-waitlist.sql` must already be applied; duplicate clinic emails must
+be resolved first (the script creates a unique index on `lower(email)`):
+
+```sql
+SELECT lower(email), count(*) FROM clinics GROUP BY 1 HAVING count(*) > 1;
+```
+
+Verify after running:
+```sql
+select to_regclass('public.clinic_config'), to_regclass('public.provisioning_jobs');
+select proname from pg_proc where proname = 'create_clinic_onboarding';
+```
+
+## Tests
+
+**Validation failure (expect 422 with a field-keyed error map, nothing written):**
+```bash
+curl -i -X POST http://localhost:3000/onboarding/submit \
+  -H "Content-Type: application/json" \
+  -d '{"legal_name":"Test","contact_email":"bad","contact_mobile":"abc","addr_country":"US","timezone":"Mars/Olympus","booking_software":"FooSoft","services_list":""}'
+```
+
+**Unknown-field rejection (expect 422 `_unknown_fields`):** add `"evil":"1"` to any payload.
+
+**Honeypot (expect 200 `{"ok":true}` and NOTHING written — silent drop):**
+```bash
+curl -i -X POST http://localhost:3000/onboarding/submit \
+  -H "Content-Type: application/json" \
+  -d '{"website_url":"http://spam.example"}'
+```
+
+**Happy path (expect 200 `{clinic_id, slug, onboarding_status:"created", existing:false, next_steps:[...]}`):**
+```bash
+curl -i -X POST http://localhost:3000/onboarding/submit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "legal_name":"Glow MedSpa LLC","dba_name":"Glow MedSpa",
+    "contact_email":"owner@glowmedspa.com","contact_mobile":"(415) 555-2671",
+    "addr_country":"USA","addr_city":"San Francisco",
+    "timezone":"America/Los_Angeles (Pacific)","booking_software":"Vagaro",
+    "services_list":"Botox, Filler, HydraFacial",
+    "hours_mon_open":"09:00","hours_mon_close":"18:00","hours_sun_closed":"true",
+    "quiet_start":"20:00","quiet_end":"09:00"
+  }'
+```
+
+**Idempotency (run the happy-path curl again → expect 200 `{"existing":true}` with the SAME `clinic_id`, no second row).**
+
+**Expected Supabase rows after the happy path:**
+
+| Table | Key fields to expect |
+|---|---|
+| `clinics` | `is_active=false`, `onboarding_status='created'`, `slug='glow-medspa'`, `phone_number=NULL`, `booking_software_status='waiting_for_credentials'` (Vagaro) |
+| `clinic_config` | `business_hours.mon={"open":"09:00",...}`, `quiet_hours={"start":"20:00","end":"09:00"}` |
+| `onboarding_submissions` | `raw_payload` = the canonical payload (incl. `raw` original body), `idempotency_key` = email |
+| `integration_tasks` | one `twilio_number/pending` + one `vagaro_connect/waiting_for_credentials` |
+| `provisioning_jobs` | one `pending` row, `attempts=0` |
+
+**Guardrails to confirm:**
+- CORS: preflight from a non-allowlisted origin gets NO `Access-Control-Allow-Origin` header; `https://cliniqboost.com` gets one. Other routes keep the permissive global CORS.
+- Body cap: any body > 64kb → 413.
+- Rate limit: 11th submit from one IP inside 15 min → 429.
+- Turnstile: with `TURNSTILE_SECRET_KEY` unset the check is skipped (logged); set it to enforce.
+- The new clinic must NOT receive traffic: `is_active=false` means `getClinicByPhone`/`getActiveClinics` ignore it until the explicit Go-Live (Phase 2).
+
+---
+
+# Automatic Onboarding — Phase 2: async provisioning, status, go-live
+
+No new SQL — Phase 0's schema covers Phase 2. Mock conventions: `N8N_URL`
+unset = the n8n notify is skipped-success (logged); `TWILIO_PROVISION_ENABLED`
+unset/false = the number step leaves the `twilio_number` task pending.
+
+**What happens on submit now:** the RPC commits, the response returns
+immediately, then provisioning runs post-commit via `setImmediate`
+(`services/provisioning.js`): Twilio step → n8n notify → job `done` →
+`onboarding_status` recomputed (`awaiting_number` until a number is attached).
+Any failure re-queues the job with exponential backoff (10m → 12h, max
+`PROVISIONING_MAX_ATTEMPTS`), retried by the `*/15` cron
+(`jobs/provisioningRetry.js`), which also rescues jobs stuck `running` > 30 min
+after a crash.
+
+**Status polling (public, opaque UUID):**
+```bash
+curl -s http://localhost:3000/onboarding/status/CLINIC_ID
+# → { onboarding_status, is_live, phone_number_attached, tasks:[...], provisioning:{status,attempts}, next_steps }
+```
+
+**Provision callback (n8n → Railway, secret + optional HMAC):**
+```bash
+curl -i -X POST http://localhost:3000/internal/provision-callback \
+  -H "Content-Type: application/json" -H "x-cliniqboost-secret: testsecret123" \
+  -d '{"clinic_id":"CLINIC_ID","status":"done"}'
+```
+Expect 200 `{job_id, status:"done", onboarding_status:...}`; wrong/missing secret → 401.
+With `INTERNAL_HMAC_REQUIRED=true`, requests must also carry
+`x-cliniqboost-timestamp` + `x-cliniqboost-signature` = hex
+HMAC-SHA256(secret, `"<timestamp>.<raw body>"`); stale (>5 min) timestamps and
+bad signatures → 401.
+
+**Go-Live (guarded — the only way a clinic starts routing/texting):**
+```bash
+curl -i -X POST http://localhost:3000/onboarding/CLINIC_ID/go-live \
+  -H "x-cliniqboost-secret: testsecret123"
+```
+- status ≠ `ready` → **409** (nothing changes)
+- status `ready` → **200** `{live:true}`, `is_active=true`, `onboarding_status='live'`
+- repeat call → 200 `{already_live:true}`
+
+**Manual number attach (while Twilio billing is blocked):**
+```sql
+UPDATE clinics SET phone_number = '+1XXXXXXXXXX' WHERE id = 'CLINIC_ID';
+UPDATE integration_tasks SET status = 'done'
+  WHERE clinic_id = 'CLINIC_ID' AND type = 'twilio_number';
+```
+then re-run the callback curl above (status `done`) → clinic flips to `ready`
+(or `awaiting_booking_integration` if a Vagaro task is still open — mark it
+`done` when credentials are connected).
+
+**Provisioning health:**
+```bash
+curl -s http://localhost:3000/health/provisioning
+# → { status: "ok"|"degraded", jobs: {pending,running,done,failed}, stuck_pending }
+```
