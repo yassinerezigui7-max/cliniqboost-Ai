@@ -332,6 +332,182 @@ async function getStaleVipTouches(sentBeforeIso) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ONBOARDING — clinic creation (via RPC), provisioning jobs,
+// integration tasks, lead sources, import jobs
+// ═══════════════════════════════════════════════════════════════
+
+// The ONLY way a clinic is created: one Postgres transaction inside the
+// create_clinic_onboarding RPC (clinics + clinic_config + submission +
+// tasks + provisioning job, all-or-nothing). Idempotent on email.
+async function createClinicOnboarding(payload) {
+  const { data, error } = await supabase
+    .rpc('create_clinic_onboarding', { p_payload: payload });
+  if (error) throw error;
+  return data; // { clinic_id, slug, onboarding_status, existing }
+}
+
+// Exact case-insensitive email match (ilike with no wildcards).
+async function getClinicByEmail(email) {
+  const { data } = await supabase
+    .from('clinics').select('*')
+    .ilike('email', String(email).trim())
+    .limit(1)
+    .maybeSingle();
+  return data || null;
+}
+
+async function updateClinic(clinicId, patch) {
+  const { error } = await supabase
+    .from('clinics').update(patch).eq('id', clinicId);
+  if (error) throw error;
+}
+
+async function setClinicOnboardingStatus(clinicId, status) {
+  await updateClinic(clinicId, { onboarding_status: status });
+}
+
+// ── PROVISIONING JOBS ──────────────────────────────────────────
+async function getProvisioningJobByClinic(clinicId) {
+  const { data } = await supabase
+    .from('provisioning_jobs').select('*')
+    .eq('clinic_id', clinicId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data || null;
+}
+
+// Due, pending jobs for the retry cron.
+async function getDueProvisioningJobs(limit = 10) {
+  const { data, error } = await supabase
+    .from('provisioning_jobs').select('*')
+    .eq('status', 'pending')
+    .lte('next_attempt_at', new Date().toISOString())
+    .order('next_attempt_at', { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+// Crash recovery: a job left 'running' longer than staleMinutes means the
+// process died mid-provision — return it to 'pending' so the cron retries.
+async function resetStaleRunningProvisioningJobs(staleMinutes = 30) {
+  const cutoff = new Date(Date.now() - staleMinutes * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from('provisioning_jobs')
+    .update({ status: 'pending', updated_at: new Date().toISOString() })
+    .eq('status', 'running')
+    .lte('updated_at', cutoff)
+    .select('id');
+  if (error) throw error;
+  return (data || []).length;
+}
+
+async function updateProvisioningJob(jobId, patch) {
+  const { error } = await supabase
+    .from('provisioning_jobs')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', jobId);
+  if (error) throw error;
+}
+
+// Counts by status, for /health/provisioning.
+async function getProvisioningSummary() {
+  const statuses = ['pending', 'running', 'done', 'failed'];
+  const counts = await Promise.all(statuses.map(s =>
+    supabase.from('provisioning_jobs')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', s)
+  ));
+  const summary = {};
+  statuses.forEach((s, i) => { summary[s] = counts[i].count || 0; });
+  return summary;
+}
+
+// ── INTEGRATION TASKS ──────────────────────────────────────────
+async function getIntegrationTasks(clinicId) {
+  const { data, error } = await supabase
+    .from('integration_tasks').select('*')
+    .eq('clinic_id', clinicId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+async function findIntegrationTask(clinicId, type) {
+  const { data } = await supabase
+    .from('integration_tasks').select('*')
+    .eq('clinic_id', clinicId)
+    .eq('type', type)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data || null;
+}
+
+async function insertIntegrationTask({ clinicId, type, status = 'pending', payload = {} }) {
+  const { data, error } = await supabase
+    .from('integration_tasks')
+    .insert({ clinic_id: clinicId, type, status, payload })
+    .select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateIntegrationTask(taskId, patch) {
+  const { error } = await supabase
+    .from('integration_tasks')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', taskId);
+  if (error) throw error;
+}
+
+// ── LEAD SOURCES ───────────────────────────────────────────────
+// Resolve a clinic from an ingress source id (Meta page, Google form, …) —
+// this is what keeps the n8n ingress workflows clinic-agnostic.
+async function getLeadSource(channel, externalId) {
+  const { data } = await supabase
+    .from('lead_sources').select('*')
+    .eq('channel', channel)
+    .eq('external_id', externalId)
+    .maybeSingle();
+  return data || null;
+}
+
+async function insertLeadSource({ clinicId, channel, externalId }) {
+  const { data, error } = await supabase
+    .from('lead_sources')
+    .insert({ clinic_id: clinicId, channel, external_id: externalId })
+    .select().single();
+  if (error) throw error;
+  return data;
+}
+
+// ── IMPORT JOBS ────────────────────────────────────────────────
+async function insertImportJob({ clinicId, source = 'csv' }) {
+  const { data, error } = await supabase
+    .from('import_jobs')
+    .insert({ clinic_id: clinicId, source, status: 'pending' })
+    .select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateImportJob(jobId, patch) {
+  const { error } = await supabase
+    .from('import_jobs')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', jobId);
+  if (error) throw error;
+}
+
+async function getImportJob(jobId) {
+  const { data } = await supabase
+    .from('import_jobs').select('*').eq('id', jobId).maybeSingle();
+  return data || null;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // DASHBOARD — server-side aggregates (service key, bypasses RLS)
 // ═══════════════════════════════════════════════════════════════
 async function getDashboardStats() {
@@ -521,6 +697,25 @@ module.exports = {
   getExpiredOfferedWaitlist,
   getOfferedWaitlistByContact,
   updateWaitlist,
+  // onboarding
+  createClinicOnboarding,
+  getClinicByEmail,
+  updateClinic,
+  setClinicOnboardingStatus,
+  getProvisioningJobByClinic,
+  getDueProvisioningJobs,
+  resetStaleRunningProvisioningJobs,
+  updateProvisioningJob,
+  getProvisioningSummary,
+  getIntegrationTasks,
+  findIntegrationTask,
+  insertIntegrationTask,
+  updateIntegrationTask,
+  getLeadSource,
+  insertLeadSource,
+  insertImportJob,
+  updateImportJob,
+  getImportJob,
   // dashboard
   getDashboardStats,
   getRecentMessages
