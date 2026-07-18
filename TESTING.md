@@ -499,3 +499,43 @@ then re-run the callback curl above (status `done`) → clinic flips to `ready`
 curl -s http://localhost:3000/health/provisioning
 # → { status: "ok"|"degraded", jobs: {pending,running,done,failed}, stuck_pending }
 ```
+
+---
+
+# Automatic Onboarding — Phase 3: Twilio auto-provision + webhook signatures
+
+## Number auto-provision (flag-gated)
+
+With `TWILIO_PROVISION_ENABLED=true` **and** `TWILIO_SEND_ENABLED=false`
+(mock), submitting a clinic attaches a fake `+1500555xxxx` number, closes the
+`twilio_number` task, and (for non-Vagaro clinics) advances straight to
+`onboarding_status='ready'` — the whole flow without spending a cent:
+
+```bash
+TWILIO_PROVISION_ENABLED=true TWILIO_SEND_ENABLED=false npm start
+# then run the Phase-1 happy-path curl and poll /onboarding/status/:id
+# expect: phone_number_attached=true, tasks all done, onboarding_status=ready
+```
+
+With real sends enabled, `provisionNumber` buys a local number in the
+clinic's country (via `phone.js#resolveRegion`, fallback US) and sets
+`voiceUrl=/webhook/twilio/missed-call`, `smsUrl=/webhook/twilio/inbound-sms`
+under `SERVER_URL`. Keep `TWILIO_PROVISION_ENABLED=false` in prod until the
+Twilio account is funded.
+
+## Webhook signature enforcement (flag-gated)
+
+`validateWebhook` now validates against `SERVER_URL + req.originalUrl` (the
+URL Twilio actually calls — previously it used `N8N_URL`, so validation could
+never pass). Enforcement is off by default; with `TWILIO_VALIDATE_WEBHOOK=true`:
+
+```bash
+# unsigned request → 403 <Response></Response>
+curl -i -X POST http://localhost:3000/webhook/twilio/inbound-sms \
+  -d "To=%2B15551234567&From=%2B15559876543&Body=hi"
+```
+
+A correctly signed request (Twilio lib: `getExpectedTwilioSignature(authToken,
+SERVER_URL + path, params)`) returns 200. `/webhook/twilio/noshow` and
+`/reactivate` are n8n-called and unaffected. Enable in Railway only after
+verifying `SERVER_URL` is the exact public https URL configured in Twilio.

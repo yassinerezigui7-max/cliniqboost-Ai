@@ -33,15 +33,58 @@ async function sendSMS(to, from, body) {
   return message;
 }
 
+// Validate that a request to /webhook/twilio/* really came from Twilio.
+// The URL must be exactly what Twilio requested — SERVER_URL (the public
+// Railway URL) + the route path. (The old version validated against N8N_URL,
+// a host Twilio never calls, so signatures could never match.)
+//
+// Enforcement is opt-in via TWILIO_VALIDATE_WEBHOOK=true: local curl tests
+// and mock mode carry no valid signature, so default/absent = allow-all,
+// keeping existing behavior until the flag is flipped in production.
 function validateWebhook(req) {
-  const twilioSignature = req.headers['x-twilio-signature'];
-  const url = `${process.env.N8N_URL}/webhook/twilio`;
+  if (String(process.env.TWILIO_VALIDATE_WEBHOOK).toLowerCase() !== 'true') {
+    return true;
+  }
+  const serverUrl = (process.env.SERVER_URL || '').replace(/\/$/, '');
+  const url = `${serverUrl}${req.originalUrl}`;
   return twilio.validateRequest(
     process.env.TWILIO_AUTH_TOKEN,
-    twilioSignature,
+    req.headers['x-twilio-signature'],
     url,
     req.body
   );
 }
 
-module.exports = { sendSMS, validateWebhook, maskPhone };
+// Buy a phone number and point its voice/SMS webhooks at this server.
+// Mock mode (TWILIO_SEND_ENABLED=false, same convention as sendSMS): no
+// Twilio API call — returns a fake +1500555xxxx number so the provisioning
+// flow can be exercised end-to-end while the account is payment-blocked.
+async function provisionNumber({ isoCountry = 'US' } = {}) {
+  if (String(process.env.TWILIO_SEND_ENABLED).toLowerCase() === 'false') {
+    const fake = `+1500555${String(Math.floor(1000 + Math.random() * 9000))}`;
+    console.log(`[MOCK PROVISION] would buy a ${isoCountry} number — returning ${fake}`);
+    return { phoneNumber: fake, sid: 'MOCK', mock: true };
+  }
+
+  const serverUrl = (process.env.SERVER_URL || '').replace(/\/$/, '');
+  if (!serverUrl) throw new Error('SERVER_URL must be set to provision numbers');
+
+  const [available] = await client
+    .availablePhoneNumbers(isoCountry)
+    .local.list({ smsEnabled: true, voiceEnabled: true, limit: 1 });
+  if (!available) {
+    throw new Error(`no available Twilio numbers in ${isoCountry}`);
+  }
+
+  const purchased = await client.incomingPhoneNumbers.create({
+    phoneNumber: available.phoneNumber,
+    voiceUrl: `${serverUrl}/webhook/twilio/missed-call`,
+    voiceMethod: 'POST',
+    smsUrl: `${serverUrl}/webhook/twilio/inbound-sms`,
+    smsMethod: 'POST'
+  });
+  console.log(`[twilio] provisioned ${maskPhone(purchased.phoneNumber)} (${purchased.sid}) → webhooks at ${serverUrl}`);
+  return { phoneNumber: purchased.phoneNumber, sid: purchased.sid, mock: false };
+}
+
+module.exports = { sendSMS, validateWebhook, provisionNumber, maskPhone };

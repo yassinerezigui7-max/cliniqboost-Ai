@@ -1,5 +1,7 @@
 const axios = require('axios');
 const db = require('./supabase');
+const twilio = require('./twilio');
+const { resolveRegion } = require('./phone');
 const { buildSignatureHeaders } = require('./signing');
 
 // Post-commit clinic provisioning. Runs OUTSIDE the clinic-creation
@@ -29,9 +31,23 @@ async function ensureTwilioNumber(clinic) {
     return { attached: false, pending: 'flag_disabled' };
   }
 
-  // Phase 3: IncomingPhoneNumbers.create + set voice/SMS webhook URLs.
-  console.warn(`[provisioning] Twilio auto-provision not implemented yet (Phase 3) — twilio_number task stays pending for clinic ${clinic.id}`);
-  return { attached: false, pending: 'not_implemented' };
+  // Race guard: a concurrent run (immediate kick + retry cron) may have
+  // attached a number since this clinic row was loaded — never buy twice.
+  const fresh = await db.getClinicById(clinic.id);
+  if (fresh && fresh.phone_number) {
+    if (task && task.status !== 'done') await db.updateIntegrationTask(task.id, { status: 'done' });
+    return { attached: true };
+  }
+
+  // Buy the number in the clinic's country (fall back to US) and point its
+  // voice/SMS webhooks at this server. Mock mode returns a fake number.
+  const isoCountry = resolveRegion(clinic.country) || 'US';
+  const { phoneNumber, mock } = await twilio.provisionNumber({ isoCountry });
+  await db.updateClinic(clinic.id, { phone_number: phoneNumber });
+  if (task && task.status !== 'done') await db.updateIntegrationTask(task.id, { status: 'done' });
+  console.log(`[provisioning] clinic ${clinic.id} number attached${mock ? ' (MOCK)' : ''}`);
+  clinic.phone_number = phoneNumber; // keep in-memory copy current for notifyN8n
+  return { attached: true, mock };
 }
 
 // ── Step 2: notify n8n ─────────────────────────────────────────

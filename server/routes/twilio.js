@@ -5,6 +5,18 @@ const claude = require('../services/claude');
 const twilio = require('../services/twilio');
 const leadEngine = require('../services/leadEngine');
 
+// Twilio signature enforcement on the two Twilio-called webhooks (no-op
+// unless TWILIO_VALIDATE_WEBHOOK=true — see services/twilio.js). /noshow and
+// /reactivate are n8n-called, not Twilio-called, so they are not gated here.
+router.use(['/missed-call', '/inbound-sms'], (req, res, next) => {
+  if (!twilio.validateWebhook(req)) {
+    console.warn(`[twilio] rejected unsigned/forged webhook: ${req.originalUrl} from ${req.ip}`);
+    res.set('Content-Type', 'text/xml');
+    return res.status(403).send('<Response></Response>');
+  }
+  next();
+});
+
 // ── MISSED CALL WEBHOOK ────────────────────────────────────────
 // Twilio calls this when a call is missed (no answer)
 router.post('/missed-call', async (req, res) => {
