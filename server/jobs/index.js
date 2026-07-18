@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { runSequenceJob } = require('./sequenceScheduler');
 const { runVipSweep } = require('./vipSweep');
 const { runAppointmentJob } = require('./appointmentJob');
+const { runProvisioningRetry } = require('./provisioningRetry');
 
 // Register in-process cron jobs. Guarded by SCHEDULER_ENABLED so Railway can
 // disable the schedulers without a redeploy.
@@ -30,7 +31,12 @@ function registerCron() {
     runAppointmentJob().catch(err => console.error('[jobs] appointment job error:', err));
   });
 
-  console.log('[jobs] cron registered — sequences: */15 * * * * | vip-sweep: 0 10 * * * | appointments: */15 * * * *');
+  // Onboarding provisioning retries (backoff-driven) — every 15 minutes.
+  cron.schedule('*/15 * * * *', () => {
+    runProvisioningRetry().catch(err => console.error('[jobs] provisioning retry error:', err));
+  });
+
+  console.log('[jobs] cron registered — sequences: */15 * * * * | vip-sweep: 0 10 * * * | appointments: */15 * * * * | provisioning-retry: */15 * * * *');
 }
 
 module.exports = { registerCron };
