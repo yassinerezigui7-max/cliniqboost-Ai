@@ -539,3 +539,46 @@ A correctly signed request (Twilio lib: `getExpectedTwilioSignature(authToken,
 SERVER_URL + path, params)`) returns 200. `/webhook/twilio/noshow` and
 `/reactivate` are n8n-called and unaffected. Enable in Railway only after
 verifying `SERVER_URL` is the exact public https URL configured in Twilio.
+
+---
+
+# CSV patient-database import — `scripts/import-contacts.js`
+
+CLI-only tool (no app-runtime changes). All tests run against a throwaway
+clinic; nothing touches Twilio/Claude/n8n.
+
+**Setup:** create a temp clinic (any country — it sets the default phone
+region), note its UUID. Sample CSVs with realistic messy data (mixed phone
+formats, an in-file duplicate, one bad phone, one missing email, one
+impossible date) live in `scripts/lib/sample-csvs/`.
+
+**1. Default run aborts on bad phones, writing NOTHING (expect exit 1):**
+```bash
+node scripts/import-contacts.js --clinic=CLINIC_ID \
+  --file=scripts/lib/sample-csvs/vagaro-sample.csv --source=vagaro
+```
+
+**2. Dry-run with --skip-invalid (expect: 7 read / 5 unique / 5 would-insert /
+1 skipped, 0 rows in Supabase after):**
+```bash
+node scripts/import-contacts.js --clinic=CLINIC_ID \
+  --file=scripts/lib/sample-csvs/vagaro-sample.csv --source=auto --dry-run --skip-invalid
+```
+`--source=auto` must print `Source auto-detected: vagaro`.
+
+**3. Real run (drop --dry-run): expect `Inserted: 5`, then verify in Supabase:**
+- all phones E.164 (`+1415555xxxx`), `status='patient'`
+- the in-file duplicate (two rows sharing a phone) merged into ONE contact
+  carrying the later `last_visit_date` and higher `total_visits`
+- the impossible date (`02/30/2026`) landed as `last_visit_date=NULL`, no abort
+
+**4. Dedup / enrichment safety:**
+- Re-run the same command → `Inserted: 0, Updated: 0, Unchanged: 5`.
+- Manually set one contact's `name` to something custom and its
+  `total_visits`/`last_visit_date` to stale values, re-run → `Updated: 1`,
+  stats refreshed, **custom name untouched**.
+
+**5. Errors report:** any skipped row appears in `<input>.errors.csv` with the
+original columns plus a `reason` column.
+
+**Cleanup:** delete the temp clinic's contacts, then the clinic row.

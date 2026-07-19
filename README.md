@@ -35,6 +35,25 @@ Twilio phone number and their information.
 The system automatically routes all calls/texts for that
 number to their specific AI configuration.
 
+## Importing a client's patient database
+
+During onboarding, import the clinic's existing patient CSV (exported from
+Vagaro, Mindbody, Boulevard, Zenoti, or Square Appointments) with
+`scripts/import-contacts.js`. It maps each software's column names
+automatically (`--source=auto` detects the format from the header), normalizes
+every phone to E.164 using the clinic's country, dedupes on
+`(clinic_id, phone_number)` — refreshing last-visit/visit-count on existing
+contacts without ever overwriting a name or email the AI has already
+enriched — and writes any skipped rows to a `<file>.errors.csv` for review.
+Run with `--dry-run` first to see what would happen, and `--skip-invalid` to
+import past rows with bad phone numbers instead of aborting:
+
+```bash
+node scripts/import-contacts.js \
+  --clinic=a3ed4432-0210-40dc-9692-7ee306bc72b9 \
+  --file=~/Downloads/patients.csv --source=auto --dry-run
+```
+
 ## Configure Twilio webhooks
 
 After the server is deployed, point Twilio at it:
