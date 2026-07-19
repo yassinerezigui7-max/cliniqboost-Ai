@@ -54,14 +54,30 @@ router.post('/login', (req, res) => {
   return res.json({ token: makeToken(), expires_in_ms: TOKEN_TTL_MS });
 });
 
+// ── CLINICS (auth required) ────────────────────────────────────
+// Populates the dashboard's clinic switcher.
+router.get('/clinics', requireAuth, async (req, res) => {
+  try {
+    res.json({ clinics: await db.getClinicsList() });
+  } catch (err) {
+    console.error('Dashboard clinics error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── STATS (auth required) ──────────────────────────────────────
+// Optional ?clinic_id=<uuid> scopes to one clinic. Missing or "all" =
+// aggregated cross-clinic view. NOTE: clinic_id is a VIEW filter, not a
+// security boundary — anyone with the dashboard password can query any clinic
+// (intended for solo-operator use; see TESTING.md).
 router.get('/stats', requireAuth, async (req, res) => {
   try {
+    const clinicId = req.query.clinic_id;
     const [stats, recent] = await Promise.all([
-      db.getDashboardStats(),
-      db.getRecentMessages(20)
+      db.getDashboardStats(clinicId),
+      db.getRecentMessages(20, clinicId)
     ]);
-    res.json({ ...stats, recent_messages: recent });
+    res.json({ ...stats, clinic_id: clinicId || 'all', recent_messages: recent });
   } catch (err) {
     console.error('Dashboard stats error:', err);
     res.status(500).json({ error: err.message });

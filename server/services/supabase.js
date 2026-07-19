@@ -510,13 +510,26 @@ async function getImportJob(jobId) {
 // ═══════════════════════════════════════════════════════════════
 // DASHBOARD — server-side aggregates (service key, bypasses RLS)
 // ═══════════════════════════════════════════════════════════════
-async function getDashboardStats() {
+// All clinics for the dashboard switcher.
+async function getClinicsList() {
+  const { data, error } = await supabase
+    .from('clinics')
+    .select('id, name, phone_number')
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+// Stats optionally scoped to one clinic. Omit clinicId (or pass 'all') for the
+// aggregated cross-clinic view.
+async function getDashboardStats(clinicId) {
   const today = new Date().toISOString().split('T')[0];
+  const scope = (q) => (clinicId && clinicId !== 'all') ? q.eq('clinic_id', clinicId) : q;
   const [missed, messages, conversations, appointments] = await Promise.all([
-    supabase.from('missed_calls').select('*', { count: 'exact', head: true }).gte('created_at', today),
-    supabase.from('messages').select('*', { count: 'exact', head: true }).gte('created_at', today),
-    supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('status', 'active'),
-    supabase.from('appointments').select('*', { count: 'exact', head: true }).gte('created_at', today)
+    scope(supabase.from('missed_calls').select('*', { count: 'exact', head: true }).gte('created_at', today)),
+    scope(supabase.from('messages').select('*', { count: 'exact', head: true }).gte('created_at', today)),
+    scope(supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('status', 'active')),
+    scope(supabase.from('appointments').select('*', { count: 'exact', head: true }).gte('created_at', today))
   ]);
   return {
     missed_calls_today: missed.count || 0,
@@ -526,12 +539,14 @@ async function getDashboardStats() {
   };
 }
 
-async function getRecentMessages(limit = 20) {
-  const { data, error } = await supabase
+async function getRecentMessages(limit = 20, clinicId) {
+  let q = supabase
     .from('messages')
     .select('direction, body, created_at')
     .order('created_at', { ascending: false })
     .limit(limit);
+  if (clinicId && clinicId !== 'all') q = q.eq('clinic_id', clinicId);
+  const { data, error } = await q;
   if (error) throw error;
   return (data || []).reverse(); // chronological for the feed
 }
@@ -717,6 +732,7 @@ module.exports = {
   updateImportJob,
   getImportJob,
   // dashboard
+  getClinicsList,
   getDashboardStats,
   getRecentMessages
 };

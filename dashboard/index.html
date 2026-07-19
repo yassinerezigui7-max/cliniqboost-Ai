@@ -13,19 +13,26 @@
       min-height: 100vh;
       padding: 24px;
     }
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 32px;
-    }
-    .logo { font-size: 22px; font-weight: 700; color: #fff; }
-    .logo span { color: #2F2FE4; }
+    .logo-img { height: 26px; width: auto; display: block; }
+    .header { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; flex-wrap: wrap; }
     .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #1DB87A; animation: pulse 2s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     .live-label { font-size: 12px; color: #1DB87A; font-weight: 600; }
-    .logout { margin-left: auto; font-size: 12px; color: rgba(255,255,255,0.4); background: none; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+    .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+    .clinic-select {
+      background: #0F0E2A; color: #fff; border: 1px solid rgba(47,47,228,0.35);
+      border-radius: 10px; padding: 9px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
+      min-width: 200px;
+    }
+    .clinic-select:focus { outline: none; border-color: #2F2FE4; }
+    .logout { font-size: 12px; color: rgba(255,255,255,0.4); background: none; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
     .logout:hover { color: #fff; border-color: rgba(255,255,255,0.3); }
+
+    /* Selected-clinic banner */
+    .clinic-banner { margin-bottom: 24px; }
+    .clinic-banner .name { font-size: 22px; font-weight: 700; color: #fff; }
+    .clinic-banner .phone { font-size: 14px; color: rgba(255,255,255,0.45); margin-top: 2px; }
+
     .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
     .stat-card { background: #0F0E2A; border: 1px solid rgba(47,47,228,0.18); border-radius: 12px; padding: 20px; }
     .stat-num { font-size: 36px; font-weight: 700; color: #2F2FE4; line-height: 1; margin-bottom: 6px; }
@@ -41,9 +48,17 @@
     .msg-time { font-size: 11px; color: rgba(255,255,255,0.25); flex-shrink: 0; }
     #status { font-size: 12px; color: rgba(255,255,255,0.3); margin-top: 8px; }
     .empty { color: rgba(255,255,255,0.2); font-size: 13px; text-align: center; padding: 20px; }
+
+    /* Empty state (no clinics) */
+    #no-clinics { background: #0F0E2A; border: 1px solid rgba(47,47,228,0.15); border-radius: 12px; padding: 48px 24px; text-align: center; }
+    #no-clinics h2 { font-size: 18px; color: #fff; margin-bottom: 8px; }
+    #no-clinics p { font-size: 14px; color: rgba(255,255,255,0.45); line-height: 1.6; }
+    #no-clinics code { background: rgba(47,47,228,0.15); color: #8888ff; padding: 2px 8px; border-radius: 6px; }
+
     /* Login overlay */
     #login { position: fixed; inset: 0; background: #080616; display: flex; align-items: center; justify-content: center; z-index: 10; }
     .login-card { background: #0F0E2A; border: 1px solid rgba(47,47,228,0.2); border-radius: 14px; padding: 32px; width: 320px; text-align: center; }
+    .login-card .logo-img { height: 30px; margin: 0 auto 20px; }
     .login-card h1 { font-size: 20px; margin-bottom: 4px; color: #fff; }
     .login-card p { font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 20px; }
     .login-card input { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: #080616; color: #fff; font-size: 14px; margin-bottom: 12px; }
@@ -59,7 +74,7 @@
 <!-- Login gate -->
 <div id="login">
   <div class="login-card">
-    <div class="logo" style="margin-bottom:16px">clini<span>q</span>boost</div>
+    <img class="logo-img" src="assets/logo.svg" alt="cliniqboost" />
     <h1>Dashboard</h1>
     <p>Enter the dashboard password to continue</p>
     <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" />
@@ -71,39 +86,61 @@
 <!-- Dashboard (hidden until authed) -->
 <div id="app" class="hidden">
   <div class="header">
-    <div class="logo">clini<span>q</span>boost</div>
+    <img class="logo-img" src="assets/logo.svg" alt="cliniqboost" />
     <div class="live-dot"></div>
     <div class="live-label">LIVE</div>
-    <button class="logout" id="logout-btn">Sign out</button>
+    <div class="header-right">
+      <select class="clinic-select hidden" id="clinic-select"></select>
+      <button class="logout" id="logout-btn">Sign out</button>
+    </div>
   </div>
 
-  <div class="stats">
-    <div class="stat-card"><div class="stat-num" id="stat-missed">—</div><div class="stat-label">Missed Calls Today</div></div>
-    <div class="stat-card"><div class="stat-num" id="stat-messages">—</div><div class="stat-label">Messages Today</div></div>
-    <div class="stat-card"><div class="stat-num" id="stat-conversations">—</div><div class="stat-label">Active Conversations</div></div>
-    <div class="stat-card"><div class="stat-num" id="stat-booked">—</div><div class="stat-label">Appointments Booked</div></div>
+  <!-- Empty state: no clinics onboarded -->
+  <div id="no-clinics" class="hidden">
+    <h2>No clinics onboarded yet</h2>
+    <p>Submit an intake at <code>/intake-setup-ai-system</code> to create one.</p>
   </div>
 
-  <div class="section-title">Live Message Feed</div>
-  <div class="messages-feed" id="messages-feed">
-    <div class="empty">Loading…</div>
+  <!-- Main dashboard -->
+  <div id="dash">
+    <div class="clinic-banner" id="clinic-banner">
+      <div class="name" id="clinic-name"></div>
+      <div class="phone" id="clinic-phone"></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" id="stat-missed">—</div><div class="stat-label">Missed Calls Today</div></div>
+      <div class="stat-card"><div class="stat-num" id="stat-messages">—</div><div class="stat-label">Messages Today</div></div>
+      <div class="stat-card"><div class="stat-num" id="stat-conversations">—</div><div class="stat-label">Active Conversations</div></div>
+      <div class="stat-card"><div class="stat-num" id="stat-booked">—</div><div class="stat-label">Appointments Booked</div></div>
+    </div>
+
+    <div class="section-title">Live Message Feed</div>
+    <div class="messages-feed" id="messages-feed"><div class="empty">Loading…</div></div>
+    <div id="status"></div>
   </div>
-  <div id="status"></div>
 </div>
 
 <script>
   // ── Config ──────────────────────────────────────────────────
   // The dashboard talks ONLY to the backend (no Supabase key in the browser).
-  // Served from the backend at /dashboard, so same-origin works out of the box.
-  // If you host this page elsewhere, set API_BASE to your Railway URL.
   const API_BASE = '';
   const POLL_MS = 15000;
-
   const TOKEN_KEY = 'cliniqboost_dashboard_token';
+  const CLINIC_KEY = 'cliniqboost_dashboard_clinic';
+
+  // "All Clinics" (aggregated) is only offered when the URL has ?admin=1, so a
+  // client demoing their own clinic never accidentally sees other clinics' data.
+  const IS_ADMIN = new URLSearchParams(location.search).get('admin') === '1';
+
   let pollTimer = null;
+  let clinics = [];        // [{id, name, phone_number}]
+  let selectedClinic = ''; // clinic id, or 'all'
 
   const $ = (id) => document.getElementById(id);
   const authHeader = () => ({ 'Authorization': 'Bearer ' + (localStorage.getItem(TOKEN_KEY) || '') });
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   // ── Login ───────────────────────────────────────────────────
   async function login() {
@@ -136,29 +173,63 @@
     $('login-password').value = '';
   }
 
-  // ── Data ────────────────────────────────────────────────────
+  // ── Clinics ─────────────────────────────────────────────────
+  async function loadClinics() {
+    const res = await fetch(API_BASE + '/dashboard-api/clinics', { headers: authHeader() });
+    if (res.status === 401) { logout(); return false; }
+    const d = await res.json();
+    clinics = d.clinics || [];
+    return true;
+  }
+
+  function resolveSelected() {
+    const stored = localStorage.getItem(CLINIC_KEY);
+    const ids = clinics.map((c) => c.id);
+    // 'all' is only valid for admins.
+    if (stored === 'all' && IS_ADMIN) return 'all';
+    if (stored && ids.includes(stored)) return stored;
+    // Default to the first clinic — never 'all' by default.
+    return ids[0] || '';
+  }
+
+  function buildClinicSelect() {
+    const sel = $('clinic-select');
+    const opts = [];
+    if (IS_ADMIN) opts.push('<option value="all">All Clinics</option>');
+    for (const c of clinics) opts.push(`<option value="${esc(c.id)}">${esc(c.name || 'Unnamed clinic')}</option>`);
+    sel.innerHTML = opts.join('');
+    sel.value = selectedClinic;
+    sel.classList.remove('hidden');
+  }
+
+  function renderBanner() {
+    if (selectedClinic === 'all') {
+      $('clinic-name').textContent = 'All Clinics';
+      $('clinic-phone').textContent = 'Aggregated view (admin)';
+      return;
+    }
+    const c = clinics.find((x) => x.id === selectedClinic);
+    $('clinic-name').textContent = c ? (c.name || 'Unnamed clinic') : '';
+    $('clinic-phone').textContent = c ? (c.phone_number || '') : '';
+  }
+
+  // ── Stats ───────────────────────────────────────────────────
   async function loadStats() {
     try {
-      const res = await fetch(API_BASE + '/dashboard-api/stats', { headers: authHeader() });
+      const q = selectedClinic ? ('?clinic_id=' + encodeURIComponent(selectedClinic)) : '';
+      const res = await fetch(API_BASE + '/dashboard-api/stats' + q, { headers: authHeader() });
       if (res.status === 401) { logout(); return; }
       if (!res.ok) { $('status').textContent = 'Error loading stats'; return; }
       const d = await res.json();
-
       $('stat-missed').textContent = d.missed_calls_today ?? 0;
       $('stat-messages').textContent = d.messages_today ?? 0;
       $('stat-conversations').textContent = d.active_conversations ?? 0;
       $('stat-booked').textContent = d.appointments_today ?? 0;
-
       renderFeed(d.recent_messages || []);
       $('status').textContent = '● Connected — updated ' + new Date().toLocaleTimeString();
     } catch (e) {
       $('status').textContent = 'Connection lost — retrying…';
     }
-  }
-
-  function esc(s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
   function renderFeed(messages) {
@@ -173,10 +244,36 @@
     feed.scrollTop = feed.scrollHeight;
   }
 
+  function onClinicChange() {
+    selectedClinic = $('clinic-select').value;
+    localStorage.setItem(CLINIC_KEY, selectedClinic);
+    renderBanner();
+    loadStats();
+  }
+
   // ── Boot ────────────────────────────────────────────────────
-  function showApp() {
+  async function showApp() {
     $('login').classList.add('hidden');
     $('app').classList.remove('hidden');
+
+    const ok = await loadClinics();
+    if (ok === false) return; // 401 -> bounced to login
+
+    if (!clinics.length) {
+      // Empty state — no clinics onboarded.
+      $('no-clinics').classList.remove('hidden');
+      $('dash').classList.add('hidden');
+      $('clinic-select').classList.add('hidden');
+      return;
+    }
+    $('no-clinics').classList.add('hidden');
+    $('dash').classList.remove('hidden');
+
+    selectedClinic = resolveSelected();
+    localStorage.setItem(CLINIC_KEY, selectedClinic);
+    buildClinicSelect();
+    renderBanner();
+
     loadStats();
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(loadStats, POLL_MS);
@@ -185,8 +282,8 @@
   $('login-btn').addEventListener('click', login);
   $('login-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
   $('logout-btn').addEventListener('click', logout);
+  $('clinic-select').addEventListener('change', onClinicChange);
 
-  // If we already have a token, try to use it; loadStats will bounce to login on 401.
   if (localStorage.getItem(TOKEN_KEY)) showApp();
 </script>
 </body>

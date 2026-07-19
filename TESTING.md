@@ -360,6 +360,27 @@ or when it expires (a 401 bounces you back to the login screen).
 > `supabase/dashboard-rls-policies.sql` is the **superseded** Option A (public anon-read policies).
 > It is NOT needed with this login-gated design and should not be run in production.
 
+## Per-clinic scoping (clinic switcher)
+
+- `GET /dashboard-api/clinics` (auth) → `{ clinics: [{id, name, phone_number}] }` populates the switcher.
+- `GET /dashboard-api/stats?clinic_id=<uuid>` scopes stats + feed to one clinic; omit it or pass
+  `clinic_id=all` for the aggregated cross-clinic view.
+
+**Test:**
+1. Seed a second clinic in Supabase (any `clinics` row with a `name`).
+2. Open `/dashboard/`, log in → the **clinic dropdown** appears top-right listing both clinics; the
+   header shows the selected clinic's **name + phone**. It defaults to the first clinic (never "All").
+3. Switch clinics → stat tiles and the message feed update independently.
+4. Open `/dashboard/?admin=1` → an **"All Clinics"** (aggregated) option appears in the dropdown.
+   Without `?admin=1` it is hidden, so a client demoing their own clinic can't switch to others.
+5. Reload the page → the last selected clinic is restored from `localStorage`.
+
+> ⚠️ **Not a security boundary.** `clinic_id` is a view filter only — anyone with the dashboard
+> password can request any clinic's data (or `all`) directly via the API; the `admin=1` gate is
+> just UI convenience to prevent *accidental* cross-clinic display during a demo. This is fine for
+> solo-operator use. For true per-tenant isolation, add per-clinic user accounts + scope the token
+> to a clinic (a later enhancement).
+
 ---
 
 # Automatic Onboarding — Phase 0 + 1: `POST /onboarding/submit`
