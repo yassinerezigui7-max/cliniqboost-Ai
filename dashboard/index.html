@@ -6,66 +6,92 @@
   <title>cliniqboost — AI Dashboard</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #080616; --card: #0F0E2A; --border: rgba(47,47,228,0.18);
+      --blue: #2F2FE4; --gold: #FFD400; --green: #1DB87A; --red: #FF6B6B;
+      --muted: rgba(255,255,255,0.5);
+    }
     body {
       font-family: 'Inter', -apple-system, sans-serif;
-      background: #080616;
-      color: #E8E8FF;
-      min-height: 100vh;
-      padding: 24px;
+      background: var(--bg); color: #E8E8FF; min-height: 100vh; padding: 24px;
+      font-feature-settings: 'tnum' 1;
     }
+    .wrap { max-width: 1280px; margin: 0 auto; }
     .logo-img { height: 26px; width: auto; display: block; }
-    .header { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; flex-wrap: wrap; }
-    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #1DB87A; animation: pulse 2s infinite; }
+
+    .header { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; flex-wrap: wrap; }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-    .live-label { font-size: 12px; color: #1DB87A; font-weight: 600; }
+    .live-label { font-size: 12px; color: var(--green); font-weight: 600; }
     .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-    .clinic-select {
-      background: #0F0E2A; color: #fff; border: 1px solid rgba(47,47,228,0.35);
-      border-radius: 10px; padding: 9px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
-      min-width: 200px;
-    }
-    .clinic-select:focus { outline: none; border-color: #2F2FE4; }
-    .logout { font-size: 12px; color: rgba(255,255,255,0.4); background: none; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+    .clinic-select { background: var(--card); color: #fff; border: 1px solid rgba(47,47,228,0.35);
+      border-radius: 10px; padding: 9px 12px; font-size: 13px; font-weight: 600; cursor: pointer; min-width: 200px; }
+    .clinic-select:focus { outline: none; border-color: var(--blue); }
+    .logout { font-size: 12px; color: var(--muted); background: none; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
     .logout:hover { color: #fff; border-color: rgba(255,255,255,0.3); }
 
-    /* Selected-clinic banner */
-    .clinic-banner { margin-bottom: 24px; }
+    .clinic-banner { margin-bottom: 20px; }
     .clinic-banner .name { font-size: 22px; font-weight: 700; color: #fff; }
-    .clinic-banner .phone { font-size: 14px; color: rgba(255,255,255,0.45); margin-top: 2px; }
+    .clinic-banner .phone { font-size: 14px; color: var(--muted); margin-top: 2px; }
 
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
-    .stat-card { background: #0F0E2A; border: 1px solid rgba(47,47,228,0.18); border-radius: 12px; padding: 20px; }
-    .stat-num { font-size: 36px; font-weight: 700; color: #2F2FE4; line-height: 1; margin-bottom: 6px; }
+    /* Timeframe segmented control */
+    .toolbar { display: flex; align-items: center; margin-bottom: 16px; }
+    .timeframe { display: inline-flex; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 2px; }
+    .timeframe button { background: none; border: none; color: var(--muted); font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 8px; cursor: pointer; transition: all 150ms; }
+    .timeframe button:hover { color: #fff; }
+    .timeframe button.active { background: var(--blue); color: #fff; }
+
+    /* Stat cards */
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+    .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px; transition: transform 150ms, box-shadow 150ms; }
+    .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(47,47,228,0.12); }
+    .stat-card.hero { grid-column: span 2; }
+    .stat-num { font-size: 36px; font-weight: 700; color: var(--blue); line-height: 1; margin-bottom: 8px; letter-spacing: -0.01em; }
+    .stat-card.hero .stat-num { font-size: 48px; color: var(--gold); letter-spacing: -0.02em; }
     .stat-label { font-size: 12px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; }
-    .section-title { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
-    .messages-feed { background: #0F0E2A; border: 1px solid rgba(47,47,228,0.15); border-radius: 12px; padding: 16px; max-height: 400px; overflow-y: auto; }
-    .message-item { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04); animation: fadeIn 0.3s ease; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; } }
-    .msg-direction { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 99px; flex-shrink: 0; align-self: flex-start; margin-top: 2px; }
-    .msg-direction.inbound { background: rgba(47,47,228,0.15); color: #6666FF; }
-    .msg-direction.outbound { background: rgba(29,184,122,0.15); color: #1DB87A; }
-    .msg-body { font-size: 13px; color: #E8E8FF; line-height: 1.5; flex: 1; }
-    .msg-time { font-size: 11px; color: rgba(255,255,255,0.25); flex-shrink: 0; }
-    #status { font-size: 12px; color: rgba(255,255,255,0.3); margin-top: 8px; }
-    .empty { color: rgba(255,255,255,0.2); font-size: 13px; text-align: center; padding: 20px; }
+    .delta { display: inline-flex; align-items: center; gap: 4px; margin-top: 12px; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 999px; }
+    .delta.up { color: var(--green); background: rgba(29,184,122,0.14); }
+    .delta.down { color: var(--red); background: rgba(255,107,107,0.14); }
+    .delta.flat { color: var(--muted); background: rgba(255,255,255,0.06); }
 
-    /* Empty state (no clinics) */
-    #no-clinics { background: #0F0E2A; border: 1px solid rgba(47,47,228,0.15); border-radius: 12px; padding: 48px 24px; text-align: center; }
+    @media (max-width: 860px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .stat-card.hero { grid-column: span 2; }
+    }
+
+    .section-title { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
+    .messages-feed { background: var(--card); border: 1px solid rgba(47,47,228,0.15); border-radius: 14px; padding: 8px 16px; max-height: 440px; overflow-y: auto; }
+    .message-item { display: flex; gap: 12px; padding: 14px 0; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: flex-start; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; } }
+    .msg-direction { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 99px; flex-shrink: 0; margin-top: 2px; }
+    .msg-direction.inbound { background: rgba(47,47,228,0.15); color: #6666FF; }
+    .msg-direction.outbound { background: rgba(29,184,122,0.15); color: var(--green); }
+    .msg-main { flex: 1; min-width: 0; }
+    .msg-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; flex-wrap: wrap; }
+    .msg-name { font-size: 14px; font-weight: 600; color: #E8E8FF; }
+    .chip { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 999px; }
+    .chip.source { background: rgba(47,47,228,0.15); color: #8888ff; }
+    .chip.status { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.55); }
+    .msg-body { font-size: 13px; color: rgba(255,255,255,0.75); line-height: 1.5; }
+    .msg-time { font-size: 11px; color: rgba(255,255,255,0.25); flex-shrink: 0; margin-top: 2px; }
+    #status { font-size: 12px; color: rgba(255,255,255,0.3); margin-top: 8px; }
+    .empty { color: rgba(255,255,255,0.2); font-size: 13px; text-align: center; padding: 24px; }
+
+    #no-clinics { background: var(--card); border: 1px solid rgba(47,47,228,0.15); border-radius: 14px; padding: 48px 24px; text-align: center; }
     #no-clinics h2 { font-size: 18px; color: #fff; margin-bottom: 8px; }
-    #no-clinics p { font-size: 14px; color: rgba(255,255,255,0.45); line-height: 1.6; }
+    #no-clinics p { font-size: 14px; color: var(--muted); line-height: 1.6; }
     #no-clinics code { background: rgba(47,47,228,0.15); color: #8888ff; padding: 2px 8px; border-radius: 6px; }
 
-    /* Login overlay */
-    #login { position: fixed; inset: 0; background: #080616; display: flex; align-items: center; justify-content: center; z-index: 10; }
-    .login-card { background: #0F0E2A; border: 1px solid rgba(47,47,228,0.2); border-radius: 14px; padding: 32px; width: 320px; text-align: center; }
+    #login { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 10; }
+    .login-card { background: var(--card); border: 1px solid rgba(47,47,228,0.2); border-radius: 14px; padding: 32px; width: 320px; text-align: center; }
     .login-card .logo-img { height: 30px; margin: 0 auto 20px; }
     .login-card h1 { font-size: 20px; margin-bottom: 4px; color: #fff; }
     .login-card p { font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 20px; }
-    .login-card input { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: #080616; color: #fff; font-size: 14px; margin-bottom: 12px; }
-    .login-card input:focus { outline: none; border-color: #2F2FE4; }
-    .login-card button { width: 100%; padding: 12px; border-radius: 10px; border: none; background: #2F2FE4; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .login-card input { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: var(--bg); color: #fff; font-size: 14px; margin-bottom: 12px; }
+    .login-card input:focus { outline: none; border-color: var(--blue); }
+    .login-card button { width: 100%; padding: 12px; border-radius: 10px; border: none; background: var(--blue); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
     .login-card button:hover { background: #2424c0; }
-    .login-err { color: #ff6b6b; font-size: 12px; margin-top: 12px; min-height: 16px; }
+    .login-err { color: var(--red); font-size: 12px; margin-top: 12px; min-height: 16px; }
     .hidden { display: none !important; }
   </style>
 </head>
@@ -84,7 +110,7 @@
 </div>
 
 <!-- Dashboard (hidden until authed) -->
-<div id="app" class="hidden">
+<div id="app" class="hidden"><div class="wrap">
   <div class="header">
     <img class="logo-img" src="assets/logo.svg" alt="cliniqboost" />
     <div class="live-dot"></div>
@@ -95,52 +121,76 @@
     </div>
   </div>
 
-  <!-- Empty state: no clinics onboarded -->
   <div id="no-clinics" class="hidden">
     <h2>No clinics onboarded yet</h2>
     <p>Submit an intake at <code>/intake-setup-ai-system</code> to create one.</p>
   </div>
 
-  <!-- Main dashboard -->
   <div id="dash">
     <div class="clinic-banner" id="clinic-banner">
       <div class="name" id="clinic-name"></div>
       <div class="phone" id="clinic-phone"></div>
     </div>
 
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num" id="stat-missed">—</div><div class="stat-label">Missed Calls Today</div></div>
-      <div class="stat-card"><div class="stat-num" id="stat-messages">—</div><div class="stat-label">Messages Today</div></div>
-      <div class="stat-card"><div class="stat-num" id="stat-conversations">—</div><div class="stat-label">Active Conversations</div></div>
-      <div class="stat-card"><div class="stat-num" id="stat-booked">—</div><div class="stat-label">Appointments Booked</div></div>
+    <div class="toolbar">
+      <div class="timeframe" id="timeframe">
+        <button data-range="today" class="active">Today</button>
+        <button data-range="7d">7 days</button>
+        <button data-range="30d">30 days</button>
+      </div>
     </div>
 
-    <div class="section-title">Live Message Feed</div>
+    <div class="stats">
+      <div class="stat-card hero">
+        <div class="stat-num" id="stat-revenue">—</div>
+        <div class="stat-label" id="label-revenue">Revenue Recovered · Today</div>
+        <div class="delta flat" id="delta-revenue"></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" id="stat-appts">—</div>
+        <div class="stat-label">Appointments Booked</div>
+        <div class="delta flat" id="delta-appts"></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" id="stat-missed">—</div>
+        <div class="stat-label">Missed Calls Recovered</div>
+        <div class="delta flat" id="delta-missed"></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" id="stat-leads">—</div>
+        <div class="stat-label">Leads Captured</div>
+        <div class="delta flat" id="delta-leads"></div>
+      </div>
+    </div>
+
+    <div class="section-title">Live Conversations</div>
     <div class="messages-feed" id="messages-feed"><div class="empty">Loading…</div></div>
     <div id="status"></div>
   </div>
-</div>
+</div></div>
 
 <script>
-  // ── Config ──────────────────────────────────────────────────
-  // The dashboard talks ONLY to the backend (no Supabase key in the browser).
   const API_BASE = '';
   const POLL_MS = 15000;
   const TOKEN_KEY = 'cliniqboost_dashboard_token';
   const CLINIC_KEY = 'cliniqboost_dashboard_clinic';
-
-  // "All Clinics" (aggregated) is only offered when the URL has ?admin=1, so a
-  // client demoing their own clinic never accidentally sees other clinics' data.
+  const RANGE_KEY = 'cliniqboost_dashboard_range';
   const IS_ADMIN = new URLSearchParams(location.search).get('admin') === '1';
 
+  const RANGE_LABEL = { today: 'Today', '7d': '7 days', '30d': '30 days' };
+  const PREV_LABEL = { today: 'vs yesterday', '7d': 'vs prev 7d', '30d': 'vs prev 30d' };
+  const STATUS_LABEL = { lead: 'New Lead', client: 'Patient', vip: 'VIP', dormant: 'Dormant', opted_out: 'Opted Out' };
+
   let pollTimer = null;
-  let clinics = [];        // [{id, name, phone_number}]
-  let selectedClinic = ''; // clinic id, or 'all'
+  let clinics = [];
+  let selectedClinic = '';
+  let currentRange = localStorage.getItem(RANGE_KEY) || 'today';
 
   const $ = (id) => document.getElementById(id);
   const authHeader = () => ({ 'Authorization': 'Bearer ' + (localStorage.getItem(TOKEN_KEY) || '') });
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const money = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('en-US');
 
   // ── Login ───────────────────────────────────────────────────
   async function login() {
@@ -148,29 +198,19 @@
     $('login-err').textContent = '';
     try {
       const res = await fetch(API_BASE + '/dashboard-api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password })
       });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        $('login-err').textContent = j.error || 'Login failed';
-        return;
-      }
+      if (!res.ok) { const j = await res.json().catch(() => ({})); $('login-err').textContent = j.error || 'Login failed'; return; }
       const { token } = await res.json();
       localStorage.setItem(TOKEN_KEY, token);
       showApp();
-    } catch (e) {
-      $('login-err').textContent = 'Could not reach the server';
-    }
+    } catch (e) { $('login-err').textContent = 'Could not reach the server'; }
   }
-
   function logout() {
     localStorage.removeItem(TOKEN_KEY);
     if (pollTimer) clearInterval(pollTimer);
-    $('app').classList.add('hidden');
-    $('login').classList.remove('hidden');
-    $('login-password').value = '';
+    $('app').classList.add('hidden'); $('login').classList.remove('hidden'); $('login-password').value = '';
   }
 
   // ── Clinics ─────────────────────────────────────────────────
@@ -181,17 +221,13 @@
     clinics = d.clinics || [];
     return true;
   }
-
   function resolveSelected() {
     const stored = localStorage.getItem(CLINIC_KEY);
     const ids = clinics.map((c) => c.id);
-    // 'all' is only valid for admins.
     if (stored === 'all' && IS_ADMIN) return 'all';
     if (stored && ids.includes(stored)) return stored;
-    // Default to the first clinic — never 'all' by default.
     return ids[0] || '';
   }
-
   function buildClinicSelect() {
     const sel = $('clinic-select');
     const opts = [];
@@ -201,78 +237,97 @@
     sel.value = selectedClinic;
     sel.classList.remove('hidden');
   }
-
   function renderBanner() {
-    if (selectedClinic === 'all') {
-      $('clinic-name').textContent = 'All Clinics';
-      $('clinic-phone').textContent = 'Aggregated view (admin)';
-      return;
-    }
+    if (selectedClinic === 'all') { $('clinic-name').textContent = 'All Clinics'; $('clinic-phone').textContent = 'Aggregated view (admin)'; return; }
     const c = clinics.find((x) => x.id === selectedClinic);
     $('clinic-name').textContent = c ? (c.name || 'Unnamed clinic') : '';
     $('clinic-phone').textContent = c ? (c.phone_number || '') : '';
   }
 
-  // ── Stats ───────────────────────────────────────────────────
+  // ── Deltas + stats ──────────────────────────────────────────
+  function renderDelta(el, metric) {
+    const p = metric && metric.delta_pct;
+    el.classList.remove('up', 'down', 'flat');
+    if (p == null) { el.classList.add('flat'); el.textContent = '· new'; return; }
+    if (p > 0) { el.classList.add('up'); el.textContent = `↑ ${p}% ${PREV_LABEL[currentRange]}`; }
+    else if (p < 0) { el.classList.add('down'); el.textContent = `↓ ${Math.abs(p)}% ${PREV_LABEL[currentRange]}`; }
+    else { el.classList.add('flat'); el.textContent = `— ${PREV_LABEL[currentRange]}`; }
+  }
+
   async function loadStats() {
     try {
-      const q = selectedClinic ? ('?clinic_id=' + encodeURIComponent(selectedClinic)) : '';
-      const res = await fetch(API_BASE + '/dashboard-api/stats' + q, { headers: authHeader() });
+      const params = new URLSearchParams();
+      if (selectedClinic) params.set('clinic_id', selectedClinic);
+      params.set('range', currentRange);
+      const res = await fetch(API_BASE + '/dashboard-api/stats?' + params.toString(), { headers: authHeader() });
       if (res.status === 401) { logout(); return; }
       if (!res.ok) { $('status').textContent = 'Error loading stats'; return; }
       const d = await res.json();
-      $('stat-missed').textContent = d.missed_calls_today ?? 0;
-      $('stat-messages').textContent = d.messages_today ?? 0;
-      $('stat-conversations').textContent = d.active_conversations ?? 0;
-      $('stat-booked').textContent = d.appointments_today ?? 0;
+
+      $('label-revenue').textContent = 'Revenue Recovered · ' + RANGE_LABEL[currentRange];
+      $('stat-revenue').textContent = money(d.revenue_recovered.value);
+      $('stat-appts').textContent = d.appointments_booked.value ?? 0;
+      $('stat-missed').textContent = d.missed_calls_recovered.value ?? 0;
+      $('stat-leads').textContent = d.leads_captured.value ?? 0;
+
+      renderDelta($('delta-revenue'), d.revenue_recovered);
+      renderDelta($('delta-appts'), d.appointments_booked);
+      renderDelta($('delta-missed'), d.missed_calls_recovered);
+      renderDelta($('delta-leads'), d.leads_captured);
+
       renderFeed(d.recent_messages || []);
       $('status').textContent = '● Connected — updated ' + new Date().toLocaleTimeString();
-    } catch (e) {
-      $('status').textContent = 'Connection lost — retrying…';
-    }
+    } catch (e) { $('status').textContent = 'Connection lost — retrying…'; }
   }
 
   function renderFeed(messages) {
     const feed = $('messages-feed');
-    if (!messages.length) { feed.innerHTML = '<div class="empty">No messages yet.</div>'; return; }
-    feed.innerHTML = messages.map((m) => `
+    if (!messages.length) { feed.innerHTML = '<div class="empty">Quiet so far. New conversations will appear here in real time.</div>'; return; }
+    feed.innerHTML = messages.map((m) => {
+      const sourceChip = m.source ? `<span class="chip source">${esc(m.source)}</span>` : '';
+      const statusChip = m.status ? `<span class="chip status">${esc(STATUS_LABEL[m.status] || m.status)}</span>` : '';
+      return `
       <div class="message-item">
         <span class="msg-direction ${m.direction === 'inbound' ? 'inbound' : 'outbound'}">${esc(m.direction)}</span>
-        <span class="msg-body">${esc(m.body)}</span>
+        <div class="msg-main">
+          <div class="msg-meta"><span class="msg-name">${esc(m.contact_name)}</span>${sourceChip}${statusChip}</div>
+          <div class="msg-body">${esc(m.body)}</div>
+        </div>
         <span class="msg-time">${new Date(m.created_at).toLocaleTimeString()}</span>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     feed.scrollTop = feed.scrollHeight;
   }
 
+  // ── Events ──────────────────────────────────────────────────
   function onClinicChange() {
     selectedClinic = $('clinic-select').value;
     localStorage.setItem(CLINIC_KEY, selectedClinic);
-    renderBanner();
+    renderBanner(); loadStats();
+  }
+  function onRangeChange(e) {
+    const btn = e.target.closest('button[data-range]');
+    if (!btn) return;
+    currentRange = btn.dataset.range;
+    localStorage.setItem(RANGE_KEY, currentRange);
+    [...$('timeframe').children].forEach((b) => b.classList.toggle('active', b === btn));
     loadStats();
   }
 
   // ── Boot ────────────────────────────────────────────────────
   async function showApp() {
-    $('login').classList.add('hidden');
-    $('app').classList.remove('hidden');
-
+    $('login').classList.add('hidden'); $('app').classList.remove('hidden');
     const ok = await loadClinics();
-    if (ok === false) return; // 401 -> bounced to login
-
-    if (!clinics.length) {
-      // Empty state — no clinics onboarded.
-      $('no-clinics').classList.remove('hidden');
-      $('dash').classList.add('hidden');
-      $('clinic-select').classList.add('hidden');
-      return;
-    }
-    $('no-clinics').classList.add('hidden');
-    $('dash').classList.remove('hidden');
+    if (ok === false) return;
+    if (!clinics.length) { $('no-clinics').classList.remove('hidden'); $('dash').classList.add('hidden'); $('clinic-select').classList.add('hidden'); return; }
+    $('no-clinics').classList.add('hidden'); $('dash').classList.remove('hidden');
 
     selectedClinic = resolveSelected();
     localStorage.setItem(CLINIC_KEY, selectedClinic);
-    buildClinicSelect();
-    renderBanner();
+    buildClinicSelect(); renderBanner();
+
+    // reflect stored range in the toggle
+    [...$('timeframe').children].forEach((b) => b.classList.toggle('active', b.dataset.range === currentRange));
 
     loadStats();
     if (pollTimer) clearInterval(pollTimer);
@@ -283,6 +338,7 @@
   $('login-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
   $('logout-btn').addEventListener('click', logout);
   $('clinic-select').addEventListener('change', onClinicChange);
+  $('timeframe').addEventListener('click', onRangeChange);
 
   if (localStorage.getItem(TOKEN_KEY)) showApp();
 </script>

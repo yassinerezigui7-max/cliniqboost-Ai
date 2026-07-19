@@ -520,35 +520,120 @@ async function getClinicsList() {
   return data || [];
 }
 
-// Stats optionally scoped to one clinic. Omit clinicId (or pass 'all') for the
-// aggregated cross-clinic view.
-async function getDashboardStats(clinicId) {
-  const today = new Date().toISOString().split('T')[0];
-  const scope = (q) => (clinicId && clinicId !== 'all') ? q.eq('clinic_id', clinicId) : q;
-  const [missed, messages, conversations, appointments] = await Promise.all([
-    scope(supabase.from('missed_calls').select('*', { count: 'exact', head: true }).gte('created_at', today)),
-    scope(supabase.from('messages').select('*', { count: 'exact', head: true }).gte('created_at', today)),
-    scope(supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('status', 'active')),
-    scope(supabase.from('appointments').select('*', { count: 'exact', head: true }).gte('created_at', today))
-  ]);
+// ── Dashboard internals ────────────────────────────────────────
+const _DAY_MS = 24 * 60 * 60 * 1000;
+
+// Current + previous window bounds for a timeframe. 'today' compares to
+// yesterday; '7d'/'30d' compare to the immediately preceding period.
+function _windowBounds(range) {
+  const now = Date.now();
+  if (range === '7d' || range === '30d') {
+    const span = (range === '7d' ? 7 : 30) * _DAY_MS;
+    return {
+      cur: { gte: new Date(now - span).toISOString(), lt: null },
+      prev: { gte: new Date(now - 2 * span).toISOString(), lt: new Date(now - span).toISOString() }
+    };
+  }
+  const todayStart = new Date().toISOString().split('T')[0];        // 00:00 UTC today
+  const yesterdayStart = new Date(now - _DAY_MS).toISOString().split('T')[0];
   return {
-    missed_calls_today: missed.count || 0,
-    messages_today: messages.count || 0,
-    active_conversations: conversations.count || 0,
-    appointments_today: appointments.count || 0
+    cur: { gte: todayStart, lt: null },
+    prev: { gte: yesterdayStart, lt: todayStart }
   };
 }
 
+// null delta = "new" (no baseline to compare against).
+function _pctDelta(cur, prev) {
+  if (!prev) return cur > 0 ? null : 0;
+  return Math.round(((cur - prev) / prev) * 100);
+}
+
+function _maskPhone(n) {
+  if (!n || typeof n !== 'string' || n.length <= 4) return n || null;
+  return n.slice(0, -4) + 'XXXX';
+}
+
+function _sourceLabel(trigger) {
+  return ({ new_lead: 'Ad Lead', missed_call: 'Missed Call', inbound_sms: 'SMS',
+    reactivation: 'Dormant', noshow: 'No-Show' })[trigger] || null;
+}
+
+async function _countIn(table, bounds, clinicId, extra) {
+  let q = supabase.from(table).select('*', { count: 'exact', head: true }).gte('created_at', bounds.gte);
+  if (bounds.lt) q = q.lt('created_at', bounds.lt);
+  if (clinicId && clinicId !== 'all') q = q.eq('clinic_id', clinicId);
+  if (extra) q = extra(q);
+  const { count } = await q;
+  return count || 0;
+}
+
+// Appointments in a window (returns clinic_id rows so we can price them).
+async function _apptsIn(bounds, clinicId) {
+  let q = supabase.from('appointments').select('clinic_id').gte('created_at', bounds.gte);
+  if (bounds.lt) q = q.lt('created_at', bounds.lt);
+  if (clinicId && clinicId !== 'all') q = q.eq('clinic_id', clinicId);
+  const { data } = await q;
+  return data || [];
+}
+
+async function _priceMap() {
+  const { data } = await supabase.from('clinics').select('id, avg_service_price');
+  const m = {};
+  for (const c of data || []) m[c.id] = Number(c.avg_service_price) || 0;
+  return m;
+}
+
+/**
+ * Revenue-focused dashboard stats, optionally scoped to one clinic (omit or
+ * 'all' = aggregated) over a timeframe ('today' | '7d' | '30d'). Each metric
+ * returns { value, prev, delta_pct } so the UI can show a vs-previous delta.
+ * Revenue Recovered = each booked appointment valued at its clinic's
+ * avg_service_price.
+ */
+async function getDashboardStats(clinicId, range) {
+  const { cur, prev } = _windowBounds(range);
+  const priceMap = await _priceMap();
+  const [apptsCur, apptsPrev, missedCur, missedPrev, leadsCur, leadsPrev] = await Promise.all([
+    _apptsIn(cur, clinicId),
+    _apptsIn(prev, clinicId),
+    _countIn('missed_calls', cur, clinicId, (q) => q.eq('text_sent', true)),
+    _countIn('missed_calls', prev, clinicId, (q) => q.eq('text_sent', true)),
+    _countIn('contacts', cur, clinicId),
+    _countIn('contacts', prev, clinicId)
+  ]);
+  const sumRev = (arr) => arr.reduce((s, a) => s + (priceMap[a.clinic_id] || 0), 0);
+  const mk = (c, p) => ({ value: c, prev: p, delta_pct: _pctDelta(c, p) });
+  return {
+    range: (range === '7d' || range === '30d') ? range : 'today',
+    revenue_recovered: mk(sumRev(apptsCur), sumRev(apptsPrev)),
+    appointments_booked: mk(apptsCur.length, apptsPrev.length),
+    missed_calls_recovered: mk(missedCur, missedPrev),
+    leads_captured: mk(leadsCur, leadsPrev)
+  };
+}
+
+// Recent messages enriched with contact name, lead source, and status.
 async function getRecentMessages(limit = 20, clinicId) {
   let q = supabase
     .from('messages')
-    .select('direction, body, created_at')
+    .select('direction, body, created_at, contacts(name, phone_number, status), conversations(trigger_type)')
     .order('created_at', { ascending: false })
     .limit(limit);
   if (clinicId && clinicId !== 'all') q = q.eq('clinic_id', clinicId);
   const { data, error } = await q;
   if (error) throw error;
-  return (data || []).reverse(); // chronological for the feed
+  return (data || []).reverse().map((m) => {
+    const c = m.contacts || {};
+    const conv = m.conversations || {};
+    return {
+      direction: m.direction,
+      body: m.body,
+      created_at: m.created_at,
+      contact_name: c.name || _maskPhone(c.phone_number) || 'Unknown',
+      status: c.status || null,
+      source: _sourceLabel(conv.trigger_type)
+    };
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════

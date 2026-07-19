@@ -73,8 +73,9 @@ router.get('/clinics', requireAuth, async (req, res) => {
 router.get('/stats', requireAuth, async (req, res) => {
   try {
     const clinicId = req.query.clinic_id;
+    const range = req.query.range; // 'today' | '7d' | '30d' (default today)
     const [stats, recent] = await Promise.all([
-      db.getDashboardStats(clinicId),
+      db.getDashboardStats(clinicId, range),
       db.getRecentMessages(20, clinicId)
     ]);
     res.json({ ...stats, clinic_id: clinicId || 'all', recent_messages: recent });

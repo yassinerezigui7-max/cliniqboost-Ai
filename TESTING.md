@@ -381,6 +381,27 @@ or when it expires (a 401 bounces you back to the login screen).
 > solo-operator use. For true per-tenant isolation, add per-clinic user accounts + scope the token
 > to a clinic (a later enhancement).
 
+## Revenue metrics, deltas & timeframe (Prompt 1 restructure)
+
+`GET /dashboard-api/stats?clinic_id=<uuid>&range=<today|7d|30d>` now returns four
+revenue-focused metrics, each as `{ value, prev, delta_pct }`:
+
+| Metric | Definition |
+|---|---|
+| `revenue_recovered` | Σ `avg_service_price` of appointments booked in the window (per clinic price) |
+| `appointments_booked` | count of appointments created in the window |
+| `missed_calls_recovered` | missed calls in the window with `text_sent = true` |
+| `leads_captured` | contacts created in the window |
+
+`delta_pct` compares the window to the immediately preceding one (today↔yesterday,
+7d↔prior 7d, 30d↔prior 30d); `null` means "new" (no prior baseline). `range` defaults to `today`.
+
+**Test:**
+1. Seed an appointment + a contact + a `text_sent=true` missed call for a clinic (all today).
+2. Open `/dashboard/`, log in → the **hero card** shows `Revenue Recovered · Today` = `avg_service_price × today's appointments` (gold), plus Appointments Booked / Missed Calls Recovered / Leads Captured, each with a `↑/↓ %` (or `· new`) delta chip.
+3. Click **7 days / 30 days** → all numbers, the hero label, and the delta wording update; the choice persists in `localStorage`.
+4. The **Live Conversations** feed shows, per message: contact name (or masked phone), a lead-source chip (Ad Lead / Missed Call / SMS / Dormant / No-Show), and a status chip (New Lead / Patient / VIP / Dormant / Opted Out).
+
 ---
 
 # Automatic Onboarding — Phase 0 + 1: `POST /onboarding/submit`
