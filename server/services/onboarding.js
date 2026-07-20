@@ -22,8 +22,11 @@ async function submitOnboarding(clean) {
   const result = await db.createClinicOnboarding(clean);
 
   if (!result.existing) {
-    // Mirror the raw form body to Formspree (email copy). Fire-and-forget.
-    notify.mirrorToFormspree(clean.raw || clean);
+    // Mirror the raw form body to Formspree (email copy). Non-blocking so a slow
+    // Formspree never delays onboarding; the .catch is belt-and-suspenders since
+    // mirrorToFormspree already swallows its own errors.
+    notify.mirrorToFormspree(clean.raw || clean)
+      .catch((e) => console.error('[formspree] unexpected mirror error:', e.message));
     // Kick async provisioning post-commit (respond to the user immediately).
     // Any failure is retried by jobs/provisioningRetry.js.
     setImmediate(() => provisioning.provisionClinic(result.clinic_id));
