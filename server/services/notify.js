@@ -10,9 +10,35 @@ const FORMSPREE_URL = process.env.FORMSPREE_URL || 'https://formspree.io/f/mojga
 const TIMEOUT_MS = 10000;
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
-function postOnce(payload) {
-  return axios.post(FORMSPREE_URL, payload, {
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+// Anti-abuse / plumbing fields consumed by the onboarding route — never part of
+// a real form submission, so we don't forward them to Formspree.
+const INTERNAL_FIELDS = new Set([
+  'website_url', '_gotcha', 'turnstile_token', 'cf-turnstile-response', 'idempotency_key'
+]);
+
+// Encode the payload EXACTLY as an HTML <form> POST does:
+// application/x-www-form-urlencoded, flat key=value pairs. A JSON body returns
+// {ok:true} but Formspree does not always process it as a real submission
+// (nothing lands in the dashboard, no email) — form-encoding is what the
+// browser sends, so it's stored + emailed like a genuine submission.
+function toFormBody(payload) {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(payload || {})) {
+    if (INTERNAL_FIELDS.has(k) || v == null) continue;
+    params.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+  }
+  return params;
+}
+
+// `form` is a URLSearchParams built by toFormBody().
+function postOnce(form) {
+  return axios.post(FORMSPREE_URL, form.toString(), {
+    // Browser form encoding + Accept:json so Formspree returns JSON (which we log)
+    // instead of a 302 redirect. This is Formspree's documented AJAX pattern.
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json'
+    },
     timeout: TIMEOUT_MS,
     // Inspect non-2xx ourselves so we can log Formspree's response body (which
     // explains failures) instead of a generic "status code 4xx" message.
@@ -26,13 +52,14 @@ async function mirrorToFormspree(payload) {
     return { skipped: true };
   }
 
-  const fields = payload && typeof payload === 'object' ? Object.keys(payload) : [];
-  console.log(`[formspree] mirroring to ${FORMSPREE_URL} — ${fields.length} field(s): ${fields.join(', ')}`);
+  const form = toFormBody(payload);
+  const fields = [...form.keys()];
+  console.log(`[formspree] mirroring (form-urlencoded) to ${FORMSPREE_URL} — ${fields.length} field(s): ${fields.join(', ')}`);
 
   let last = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const res = await postOnce(payload);
+      const res = await postOnce(form);
       const ok2xx = res.status >= 200 && res.status < 300;
       const bodyRejected = res.data && res.data.ok === false; // Formspree rejection: {ok:false, errors:[...]}
       if (ok2xx && !bodyRejected) {
