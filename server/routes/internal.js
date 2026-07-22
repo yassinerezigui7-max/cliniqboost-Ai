@@ -63,4 +63,24 @@ router.get('/health/provisioning', async (req, res) => {
   }
 });
 
+// ── ACTIVE CLINICS (id list) ───────────────────────────────────
+// GET /internal/active-clinics
+// Minimal { clinics: [{ id }] } for n8n orchestration (e.g. the dormant
+// reactivation workflow fans out one /reactivate call per clinic). Reads
+// server-side via the service key, so n8n never needs an RLS-bypass key of its
+// own — the tenant tables stay RLS-locked to everything outside the backend.
+// Auth: shared secret + optional HMAC/timestamp (services/signing.js).
+router.get('/internal/active-clinics', async (req, res) => {
+  const auth = verifyRequest(req);
+  if (!auth.ok) return res.status(401).json({ error: `Unauthorized: ${auth.reason}` });
+
+  try {
+    const clinics = await db.getActiveClinics();
+    return res.status(200).json({ clinics: clinics.map((c) => ({ id: c.id })) });
+  } catch (err) {
+    console.error('Active-clinics error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
