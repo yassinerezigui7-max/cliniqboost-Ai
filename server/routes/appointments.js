@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../services/supabase');
 const appointmentsSvc = require('../services/appointments');
+const { verifyRequest } = require('../services/signing');
 
 // ── CANCELLATION → WAITLIST FILL ───────────────────────────────
 // POST /webhooks/appointment-cancelled  (same shared-secret as new-lead)
@@ -9,10 +10,12 @@ const appointmentsSvc = require('../services/appointments');
 // Typically called by the clinic's booking software / an n8n bridge when a
 // staff member cancels an appointment, freeing the slot for the waitlist.
 router.post('/appointment-cancelled', async (req, res) => {
-  const secret = req.headers['x-cliniqboost-secret'];
-  if (!process.env.NEW_LEAD_WEBHOOK_SECRET || secret !== process.env.NEW_LEAD_WEBHOOK_SECRET) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  // Auth via verifyRequest (shared secret + optional HMAC, constant-time). This
+  // route is already tenant-safe: the clinic is derived from the stored
+  // appointment below, never from the request body — so it stays on the shared
+  // secret (scoped M2 fix leaves it here; full per-clinic is blocked on V).
+  const auth = verifyRequest(req);
+  if (!auth.ok) return res.status(401).json({ error: `Unauthorized: ${auth.reason}` });
 
   try {
     const { appointment_id } = req.body || {};

@@ -128,6 +128,18 @@ async function getClinicById(clinicId) {
   return data || null;
 }
 
+// Resolve a clinic from its per-clinic webhook secret (clinic_secrets). The
+// secret IS the tenant identity for /webhooks/new-lead — the clinic is never
+// taken from caller-supplied body fields. Fails closed (returns null) on a
+// miss, a too-short token, or any error, so callers 401 rather than 500.
+async function getClinicByWebhookSecret(secret) {
+  if (!secret || typeof secret !== 'string' || secret.length < 24) return null;
+  const { data, error } = await supabase
+    .from('clinic_secrets').select('clinic_id').eq('webhook_secret', secret).maybeSingle();
+  if (error || !data) return null;
+  return getClinicById(data.clinic_id);
+}
+
 async function getActiveClinics() {
   const { data, error } = await supabase
     .from('clinics').select('*').eq('is_active', true);
@@ -767,6 +779,7 @@ module.exports = {
   supabase,
   // pillar 2 — lead engine
   getClinicById,
+  getClinicByWebhookSecret,
   getActiveClinics,
   getContactById,
   upsertLeadContact,

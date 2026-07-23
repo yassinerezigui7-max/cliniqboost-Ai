@@ -13,20 +13,23 @@ const DEDUPE_WINDOW_MINUTES = 10;
 // POST /webhooks/new-lead
 // Auth: shared-secret header x-cliniqboost-secret === NEW_LEAD_WEBHOOK_SECRET
 router.post('/new-lead', async (req, res) => {
-  // 0. Auth
+  // 0. Auth + tenant identity in ONE step. The per-clinic webhook secret
+  // resolves to exactly one clinic; the clinic is NEVER taken from the request
+  // body, so a caller can only create leads for the clinic whose secret it
+  // holds. (A leaked shared secret can no longer target an arbitrary clinic_id.)
   const secret = req.headers['x-cliniqboost-secret'];
-  if (!process.env.NEW_LEAD_WEBHOOK_SECRET || secret !== process.env.NEW_LEAD_WEBHOOK_SECRET) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  const clinic = await db.getClinicByWebhookSecret(secret);
+  if (!clinic) return res.status(401).json({ error: 'Unauthorized' });
+  if (!clinic.is_active) return res.status(422).json({ error: 'clinic is not active' });
 
   try {
-    const { clinic_id, source, name, phone, email, treatment_interest } = req.body || {};
+    const { source, name, phone, email, treatment_interest, clinic_id: bodyClinicId } = req.body || {};
 
-    // 1a. Validate clinic exists + active
-    if (!clinic_id) return res.status(422).json({ error: 'clinic_id is required' });
-    const clinic = await db.getClinicById(clinic_id);
-    if (!clinic) return res.status(422).json({ error: 'clinic_id not found' });
-    if (!clinic.is_active) return res.status(422).json({ error: 'clinic is not active' });
+    // Defense-in-depth: a legacy caller may still send clinic_id. It is not
+    // trusted for identity, but if present it must match the secret's clinic.
+    if (bodyClinicId && bodyClinicId !== clinic.id) {
+      return res.status(409).json({ error: 'clinic_id does not match the authenticated clinic' });
+    }
 
     // 1b. Validate + normalize phone to E.164 (infer region from clinic.country)
     if (!phone) return res.status(422).json({ error: 'phone is required' });

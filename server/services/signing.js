@@ -19,6 +19,15 @@ function secret() {
   return process.env.NEW_LEAD_WEBHOOK_SECRET || '';
 }
 
+// Constant-time compare, length-guarded so timingSafeEqual never throws on a
+// mismatched length. Avoids a timing side channel on the shared secret.
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a == null ? '' : a), 'utf8');
+  const bb = Buffer.from(String(b == null ? '' : b), 'utf8');
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
 function sign(body, timestamp) {
   const raw = Buffer.isBuffer(body) ? body.toString('utf8')
     : typeof body === 'string' ? body
@@ -42,7 +51,7 @@ function buildSignatureHeaders(bodyString) {
 // express.json verify hook) so the HMAC covers the exact bytes received.
 function verifyRequest(req) {
   if (!secret()) return { ok: false, reason: 'server has no NEW_LEAD_WEBHOOK_SECRET configured' };
-  if (req.headers['x-cliniqboost-secret'] !== secret()) {
+  if (!safeEqual(req.headers['x-cliniqboost-secret'], secret())) {
     return { ok: false, reason: 'bad secret' };
   }
 
