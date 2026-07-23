@@ -1,0 +1,173 @@
+{
+  "name": "cliniqboost \u2014 New-Lead Capture (PER-CLINIC template)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "b1000000-0000-4000-8000-000000000001",
+      "name": "Meta Lead Ads Trigger",
+      "type": "n8n-nodes-base.facebookLeadAdsTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        200
+      ],
+      "notes": "Connect THIS clinic's Meta page here (Facebook Lead Ads credential + page). One clone per clinic."
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n * PER-CLINIC TEMPLATE \u2014 Normalize a Meta (Facebook/Instagram) Lead Ads lead into\n * the cliniqboost shape: { source, name, phone, email, treatment_interest }.\n *\n * NOTE (M2): clinic_id is NO LONGER sent. The clinic is now determined by the\n * per-clinic webhook secret on the HTTP node's Header Auth credential, so each\n * clone identifies its clinic purely by which credential it uses. Nothing here\n * is per-clinic \u2014 only the credential + the connected Meta page are.\n *\n * Meta delivers answers as a field_data array: [{ name, values: [..] }]. Some\n * n8n versions / manual test payloads flatten these to top-level keys, so we\n * read both. Custom \"treatment\" questions vary in field name.\n */\nconst out = [];\nfor (const entry of $input.all()) {\n  const item = entry.json || {};\n\n  const fd = item.field_data || item.fieldData;\n  const fromFieldData = (keys) => {\n    if (!Array.isArray(fd)) return undefined;\n    for (const f of fd) {\n      const nm = String(f.name || '').toLowerCase();\n      if (keys.includes(nm)) {\n        const v = Array.isArray(f.values) ? f.values[0] : f.value;\n        if (v) return v;\n      }\n    }\n    return undefined;\n  };\n\n  const name = item.full_name || item.name\n    || fromFieldData(['full_name', 'name', 'your_name'])\n    || [item.first_name, item.last_name].filter(Boolean).join(' ').trim()\n    || null;\n  const phone = item.phone_number || item.phone\n    || fromFieldData(['phone_number', 'phone', 'mobile', 'mobile_number']) || null;\n  const email = item.email\n    || fromFieldData(['email', 'email_address']) || null;\n  const treatment_interest = item.treatment_interest || item.treatment\n    || fromFieldData(['treatment_interest', 'treatment', 'service', 'interest',\n        'what_service_are_you_interested_in', 'which_treatment']) || null;\n\n  out.push({ json: { source: 'ad_form', name, phone, email, treatment_interest } });\n}\nreturn out;"
+      },
+      "id": "b1000000-0000-4000-8000-000000000002",
+      "name": "Normalize Meta Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "google-lead-form-REPLACE_CLINIC_SLUG",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "b1000000-0000-4000-8000-000000000003",
+      "name": "Google Ads Lead Form Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "notes": "Set a UNIQUE path per clinic (e.g. google-lead-form-lumina) so clinics don't collide. Point that clinic's Google Lead Form webhook at this URL."
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n * PER-CLINIC TEMPLATE \u2014 Normalize a Google Ads Lead Form Extension lead into the\n * cliniqboost shape: { source, name, phone, email, treatment_interest }.\n *\n * NOTE (M2): clinic_id is NO LONGER sent \u2014 the clinic comes from the per-clinic\n * webhook secret on the HTTP node's Header Auth credential.\n *\n * Google POSTs JSON to a webhook; the n8n Webhook node nests it under $json.body.\n * Fields arrive in user_column_data: [{ column_id, string_value }].\n */\nconst out = [];\nfor (const entry of $input.all()) {\n  const body = (entry.json && entry.json.body) || entry.json || {};\n\n  const cols = body.user_column_data || body.userColumnData;\n  const fromColumns = (ids) => {\n    if (!Array.isArray(cols)) return undefined;\n    const wanted = ids.map((s) => s.toUpperCase());\n    for (const c of cols) {\n      const id = String(c.column_id || c.columnId || '').toUpperCase();\n      const nm = String(c.column_name || c.columnName || '').toUpperCase();\n      if (wanted.includes(id) || wanted.includes(nm)) {\n        const v = c.string_value || c.stringValue;\n        if (v) return v;\n      }\n    }\n    return undefined;\n  };\n\n  const name = fromColumns(['FULL_NAME', 'NAME', 'FIRST_NAME']) || body.full_name || body.name || null;\n  const phone = fromColumns(['PHONE_NUMBER', 'PHONE']) || body.phone_number || body.phone || null;\n  const email = fromColumns(['EMAIL', 'USER_EMAIL']) || body.email || null;\n  const treatment_interest = fromColumns(['TREATMENT_INTEREST', 'SERVICE', 'INTEREST', 'TREATMENT'])\n    || body.treatment_interest || null;\n\n  out.push({ json: { source: 'ad_form', name, phone, email, treatment_interest } });\n}\nreturn out;"
+      },
+      "id": "b1000000-0000-4000-8000-000000000004",
+      "name": "Normalize Google Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SERVER_URL }}/webhooks/new-lead",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "source",
+              "value": "={{ $json.source }}"
+            },
+            {
+              "name": "name",
+              "value": "={{ $json.name }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.email }}"
+            },
+            {
+              "name": "treatment_interest",
+              "value": "={{ $json.treatment_interest }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1000000-0000-4000-8000-000000000005",
+      "name": "POST to cliniqboost /webhooks/new-lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_PER_CLINIC_CREDENTIAL_ID",
+          "name": "cliniqboost Lead Secret \u2014 <CLINIC>"
+        }
+      },
+      "notes": "Auth = THIS clinic's Header Auth credential (header x-cliniqboost-secret = that clinic's webhook_secret). The secret IS the clinic identity; no clinic_id is sent. No shared env-var secret."
+    }
+  ],
+  "connections": {
+    "Meta Lead Ads Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Meta Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Meta Lead": {
+      "main": [
+        [
+          {
+            "node": "POST to cliniqboost /webhooks/new-lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Ads Lead Form Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Google Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Google Lead": {
+      "main": [
+        [
+          {
+            "node": "POST to cliniqboost /webhooks/new-lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateId": "cliniqboost-new-lead-per-clinic"
+  },
+  "tags": [
+    {
+      "name": "cliniqboost"
+    },
+    {
+      "name": "per-clinic-template"
+    }
+  ]
+}
